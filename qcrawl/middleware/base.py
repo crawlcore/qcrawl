@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -46,22 +48,22 @@ class MiddlewareResult:
     payload: object | None = None
 
     @classmethod
-    def continue_(cls) -> "MiddlewareResult":
+    def continue_(cls) -> MiddlewareResult:
         """Return a result indicating no action; engine should continue."""
         return cls(Action.CONTINUE, None)
 
     @classmethod
-    def keep(cls, page: "Page") -> "MiddlewareResult":
+    def keep(cls, page: Page) -> MiddlewareResult:
         """Return a result that accepts/replaces the response with `page`."""
         return cls(Action.KEEP, page)
 
     @classmethod
-    def retry(cls, request: "Request") -> "MiddlewareResult":
+    def retry(cls, request: Request) -> MiddlewareResult:
         """Return a result requesting that `request` be scheduled for retry."""
         return cls(Action.RETRY, request)
 
     @classmethod
-    def drop(cls) -> "MiddlewareResult":
+    def drop(cls) -> MiddlewareResult:
         """Return a result indicating the response/request should be dropped."""
         return cls(Action.DROP, None)
 
@@ -95,11 +97,11 @@ class DownloaderMiddleware:
         """Handle download exceptions.md."""
         return MiddlewareResult.continue_()
 
-    async def open_spider(self, spider: "Spider") -> None:
+    async def open_spider(self, spider: Spider) -> None:
         """Optional async hook called when a spider is opened."""
         return None
 
-    async def close_spider(self, spider: "Spider") -> None:
+    async def close_spider(self, spider: Spider) -> None:
         """Optional async hook called when a spider is closed."""
         return None
 
@@ -115,8 +117,8 @@ class SpiderMiddleware:
     """
 
     async def process_start_requests(
-        self, start_requests: AsyncGenerator["Request", None], spider: "Spider"
-    ) -> AsyncGenerator["Request", None]:
+        self, start_requests: AsyncGenerator[Request, None], spider: Spider
+    ) -> AsyncGenerator[Request, None]:
         """Process the spider's initial start_requests stream.
 
         This hook receives the async-generator produced by `Spider.start_requests()`
@@ -137,7 +139,7 @@ class SpiderMiddleware:
         async for r in start_requests:
             yield r
 
-    async def process_spider_input(self, response: "Page", spider: "Spider") -> Exception | None:
+    async def process_spider_input(self, response: Page, spider: Spider) -> Exception | None:
         """Inspect a `Page` before it is handed to the spider parser.
 
         Called immediately prior to invoking the spider's `parse()` coroutine for
@@ -158,16 +160,16 @@ class SpiderMiddleware:
 
     async def process_spider_output(
         self,
-        response: "Page",
-        result: AsyncGenerator["Item | Request | str", None],
-        spider: "Spider",
-    ) -> AsyncGenerator["Item | Request | str", None]:
+        response: Page,
+        result: AsyncGenerator[Item | Request | str, None],
+        spider: Spider,
+    ) -> AsyncGenerator[Item | Request | str, None]:
         async for r in result:
             yield r
 
     async def process_spider_exception(
-        self, response: "Page", exception: BaseException, spider: "Spider"
-    ) -> AsyncGenerator["Item | Request | str", None] | None:
+        self, response: Page, exception: BaseException, spider: Spider
+    ) -> AsyncGenerator[Item | Request | str, None] | None:
         """Handle exceptions raised during spider parsing.
 
         This hook is invoked when the spider's `parse()` generator raises an exception.
@@ -190,10 +192,10 @@ class SpiderMiddleware:
         """
         return None
 
-    async def open_spider(self, spider: "Spider") -> None:
+    async def open_spider(self, spider: Spider) -> None:
         """Optional async hook called when a spider is opened."""
         return None
 
-    async def close_spider(self, spider: "Spider") -> None:
+    async def close_spider(self, spider: Spider) -> None:
         """Optional async hook called when a spider is closed."""
         return None

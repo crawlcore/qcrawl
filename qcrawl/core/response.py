@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
 import aiohttp
@@ -60,7 +62,7 @@ class Page:
     @classmethod
     async def from_response(
         cls, resp: aiohttp.ClientResponse, request: Request | None = None
-    ) -> "Page":
+    ) -> Page:
         """Create Page from aiohttp response (async factory method).
 
         This classmethod performs the async reading of the response body and
