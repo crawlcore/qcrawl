@@ -13,7 +13,7 @@ immutable `body` (bytes), and a `meta` dict for crawler, spider, middleware, and
 
     Serialization is not implemented yet. It will be used for persisting requests into queues. I will implement it together with support of Redis backend.
 
-- Use `Request.to_bytes()` to persist requests into queues in binary format using MessagePack. 
+- Use `Request.to_bytes()` to persist requests into queues in binary format using MessagePack.
 - Reconstruct with `Request.from_bytes()` or `Request.from_dict()`; these methods validate types and raise `TypeError` for malformed input.
 
 
@@ -49,7 +49,7 @@ async def parse(self, response: Page):
     content = response.content  # bytes
     headers = response.headers  # dict-like
     # Process the response content...
-``` 
+```
 
 ## Page (response)
 

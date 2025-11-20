@@ -18,10 +18,10 @@ qCrawl is written in pure python and depends on a several key Python libraries (
 3. [yarl](https://yarl.aio-libs.org/en/latest/), an efficient URL parser and builder.
 4. [orjson](https://github.com/ijl/orjson), fast JSON library for parsing and serialization.
 
-Some of these packages themselves depend on non-Python packages that might require additional installation steps depending on your platform. 
+Some of these packages themselves depend on non-Python packages that might require additional installation steps depending on your platform.
 
 ## Installation
-Python packages can be installed either globally (system-wide installation), or in user-space using so-called *virtual environment*. 
+Python packages can be installed either globally (system-wide installation), or in user-space using so-called *virtual environment*.
 
 Generally, I suggest to install qCrawl inside a [virtual environment](https://docs.python.org/3/library/venv.html#module-venv) on all platforms.
 Virtual environments allow you to avoid conflicts with already-installed Python system packages, and still install packages normally with `pip`.
@@ -39,9 +39,9 @@ If you encounter issues installing the dependencies install following system pac
 ```shell title="Linux (Debian/Ubuntu)"
 # install compilers & headers required for building C/Rust extensions
 sudo apt update
-sudo apt install -y build-essential libssl-dev libffi-dev python3-dev libxml2-dev libxslt1-dev zlib1g-dev pkg-config 
+sudo apt install -y build-essential libssl-dev libffi-dev python3-dev libxml2-dev libxslt1-dev zlib1g-dev pkg-config
 
-# optional: install Rust toolchain if orjson fails to install 
+# optional: install Rust toolchain if orjson fails to install
 
 # preferred way to get latest stable Rust (instead of apt)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -61,7 +61,7 @@ xcode-select --install
 
 # install native libs
 brew install libxml2
- 
+
 # optional: install Rust toolchain if orjson fails to install
 brew install rust
 

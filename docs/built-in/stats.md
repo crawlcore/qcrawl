@@ -65,7 +65,7 @@ crawler.stats.set_counter("custom/processed_items", 42)
 crawler.stats.set_meta("custom/last_run", "2025-04-05")
 ```
 
-Preferred way to add custom metrics (using Signals): 
+Preferred way to add custom metrics (using Signals):
 
 ```python
 async def on_response(sender, response, request=None, **kwargs):

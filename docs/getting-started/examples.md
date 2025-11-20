@@ -18,7 +18,7 @@ from qcrawl.core.item import Item
 class QuotesCssSpider(Spider):
     name = "quotes_css"
     start_urls = ["https://quotes.toscrape.com/"]
-    
+
     custom_settings = {
         "REQUIRED_FIELDS": ["text", "author"],  # used by `ValidationPipeline` if enabled
         "DEFAULT_REQUEST_HEADERS": {

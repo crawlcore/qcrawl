@@ -1,7 +1,7 @@
-When scraping web pages, the primary task is extracting data from the documents. 
+When scraping web pages, the primary task is extracting data from the documents.
 qCrawl uses lxml as the default HTML parser because of its speed and native XPath support.
 
-## Using selectors 
+## Using selectors
 
 I will assume you have a response view object `rv` created from a response:
 
@@ -101,7 +101,7 @@ tree.cssselect('input[type="checkbox"]:checked')  # Note: :checked works
     ```python
     # Fast
     tree.cssselect('div#content p.title')
-    
+
     # Slower (scans entire document)
     tree.cssselect('p.title')
     ```
@@ -117,14 +117,14 @@ tree.cssselect('input[type="checkbox"]:checked')  # Note: :checked works
         <div class="title">Customer Reviews</div>   <!-- nested title! -->
       </div>
     </article>
-    
+
     <article class="product"> ... another product ... </article>
     ```
-    
+
     ```python
     # This will accidentally match the "Customer Reviews" title too!
     titles = tree.cssselect('.product .title')
-    
+
     # Only matches <div class="title"> that is a DIRECT child of .product
     titles = tree.cssselect('.product > .title')
     ```
@@ -135,18 +135,18 @@ tree.cssselect('input[type="checkbox"]:checked')  # Note: :checked works
     from cssselect import GenericTranslator
     from qcrawl.core.spider import Spider
     from qcrawl.core.item import Item
-    
+
     # compile once (module/class level) for reuse
     _XPATH_LINKS = GenericTranslator().css_to_xpath("article.post > a.title")
-    
+
     class ExampleSpider(Spider):
         name = "example"
         start_urls = ["https://example.com/"]
-    
+
         async def parse(self, response):
             rv = self.response_view(response)
             tree = rv.doc  # lxml.html.HtmlElement
-    
+
             for a in tree.xpath(_XPATH_LINKS):
                 href = a.get("href")
                 text = a.text_content().strip() if a is not None else ""

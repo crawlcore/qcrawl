@@ -45,7 +45,7 @@ CLI (Command-Line Interface) command:
 qcrawl --export quotes.json --export-format json quotes_spider:QuotesSpider
 ```
 
-Upon completion, the `quotes.json` file will include the extracted items. 
+Upon completion, the `quotes.json` file will include the extracted items.
 
 Example item (JSON):
 
@@ -72,7 +72,7 @@ When you run `qcrawl quotes_spider:QuotesSpider` qCrawl does the following:
 
     - Quote text → `q.cssselect('span.text')[0].text_content().strip()`
     - Author name → `q.cssselect('small.author')[0].text_content().strip()`
-    
+
     Extracted data is yielded as a structured Python dictionary:
 
     ```python
@@ -85,13 +85,13 @@ When you run `qcrawl quotes_spider:QuotesSpider` qCrawl does the following:
     These items are collected and can be exported to files (JSON, CSV, etc.) or processed further via [item pipelines](../concepts/item_pipeline.md).
 
 
-5. The spider searches for a “Next” link using a CSS selector `rv.doc.cssselect('li.next a')`. 
+5. The spider searches for a “Next” link using a CSS selector `rv.doc.cssselect('li.next a')`.
 
     If found:
 
     * A new request is scheduled to the next page URL using `yield self.follow(response, href)`.
-    * The same `parse()` method is reused as the callback until no “Next” link is present.        
-    
+    * The same `parse()` method is reused as the callback until no “Next” link is present.
+
 
 6. An item processed according to the [CLI options](../concepts/cli.md):
 
@@ -105,7 +105,7 @@ flowchart LR
   E --> G["Stdout (print data)"]
 
   D["CLI options"]:::CLI
-  
+
   %% Styles
   classDef CLI fill:#333,color:#fff,stroke:#777,stroke-width:2px
 ```
@@ -116,5 +116,5 @@ flowchart LR
     or the storage backend. You can also use [item pipeline](../concepts/item_pipeline.md) to drop / transform data.
 
 ## What’s next?
-The next steps are to [install qCrawl](installation.md), follow through the tutorial and [join the community](https://discord.gg/yT54ff6STY) on Discord.<br> 
+The next steps are to [install qCrawl](installation.md), follow through the tutorial and [join the community](https://discord.gg/yT54ff6STY) on Discord.<br>
 Thanks for your interest!

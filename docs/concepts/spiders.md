@@ -1,5 +1,5 @@
 
-A *Spider* is a class which defines what to crawl (a site or a group of sites), how to perform 
+A *Spider* is a class which defines what to crawl (a site or a group of sites), how to perform
 the crawl (i.e. follow links) and how to extract structured data from the pages (i.e. scraping items).
 
 ## Basic concepts
@@ -63,7 +63,7 @@ class QuotesSpider(Spider):
 ## Scraping lifecycle
 
 ``` mermaid
-flowchart LR  
+flowchart LR
   Spider -->|"yield Request / URL / Item"| Scheduler
   Scheduler -->|"next Request"| Engine
   Engine -->|"fetch"| Downloader
@@ -71,15 +71,15 @@ flowchart LR
   Engine -->|"call parse(response)"| Spider
 
   Spider -.->|"yield Item"| Export@{ shape: bow-rect, label: "Export process" }
-    
+
   %% Styles
-    style Export fill:#333,color:#fff,stroke:#777,stroke-width:2px  
+    style Export fill:#333,color:#fff,stroke:#777,stroke-width:2px
 ```
 
 The simplified scraping cycle works as follows:
 
-1. You generate the initial requests to crawl the first URLs, along with a callback function to handle the downloaded responses. These requests come from the `start_requests()` method of your spider, which by default yields a Request for each URL in the `start_urls: list[str]`, using `parse()` as the default callback. 
-2. Each request is placed in the scheduler’s queue. The engine pulls the next request, sends it to the downloader, and waits for the response. Once downloaded, the response is passed back to the engine. 
-3. The engine calls the callback function specified in the request — typically `parse(response)`. Inside this method, you parse the page content (using CSS selectors, XPath) and yield either `Item` objects containing extracted data or new `Request` objects for additional URLs to crawl. 
+1. You generate the initial requests to crawl the first URLs, along with a callback function to handle the downloaded responses. These requests come from the `start_requests()` method of your spider, which by default yields a Request for each URL in the `start_urls: list[str]`, using `parse()` as the default callback.
+2. Each request is placed in the scheduler’s queue. The engine pulls the next request, sends it to the downloader, and waits for the response. Once downloaded, the response is passed back to the engine.
+3. The engine calls the callback function specified in the request — typically `parse(response)`. Inside this method, you parse the page content (using CSS selectors, XPath) and yield either `Item` objects containing extracted data or new `Request` objects for additional URLs to crawl.
 4. Any yielded `Request` / `URL` / `Item` object are returned to the scheduler, enqueued, and processed in the same way — forming a continuous loop until no more requests remain.
 5. Any yielded `Item` objects are sent to the export process: [item pipelines](item_pipeline.md) (drop, transform), [exporters](exporters.md) (data formating), and storage backends (save data).

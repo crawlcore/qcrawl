@@ -1,5 +1,5 @@
 
-The qCrawl settings allows you to customize the behaviour of all the components. The settings can be populated 
+The qCrawl settings allows you to customize the behaviour of all the components. The settings can be populated
 through different mechanisms, which are described below.
 
 For middleware-specific settings, refer to the respective [middleware documentation](middlewares.md).
@@ -68,7 +68,7 @@ Use per-spider class attributes, constructor args, or `custom_settings` for fine
 Example usage:
 ```python
 class MySpider(Spider):
-    name = "my_spider"  
+    name = "my_spider"
 
     custom_settings = {
         "concurrency": 10,

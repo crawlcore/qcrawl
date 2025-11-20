@@ -15,7 +15,7 @@ They can be used via the CLI or programmatically.
 
 ## CLI usage
 
-The CLI wires exporters automatically. 
+The CLI wires exporters automatically.
 
 Example:
 

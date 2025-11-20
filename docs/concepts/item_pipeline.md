@@ -19,7 +19,7 @@ Common uses of item pipelines include:
 Item pipelines are async handlers that run when `item_scraped` is emitted by the engine (after spider parsing).
 
 To create a pipeline component, define a class with an `async def process_item(self, item: Item, spider) -> Item | None:` method.
-The method receives the scraped `item` and the `spider` that produced it. 
+The method receives the scraped `item` and the `spider` that produced it.
 
 Example pipeline that validates required fields and marks items to be dropped via metadata:
 

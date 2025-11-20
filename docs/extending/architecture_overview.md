@@ -50,7 +50,7 @@ Arrow types:
 - Dotted line — used for async results, generator yields, buffered streams or events/signals (side-effects / notifications).
 <br><br>
 
- 
+
 #### One request / response / item lifecycle
 ```mermaid
 sequenceDiagram
@@ -102,22 +102,22 @@ sequenceDiagram
 Step-by-step (what each arrow means):
 
 1. Spider yields a `Request` (or `URL` string) to Scheduler.
-2. Scheduler receives and either enqueues or directly delivers the `Request` to Engine. 
-3. Engine calls downloader middleware `process_request` hooks (pre-download processing). 
-4. Downloader middleware forwards the request to `Downloader.fetch()` (possibly altering headers/meta). 
-5. Downloader performs the HTTP request (connection pool, slots, timeouts). 
-6. Downloader returns a `Response/Page` to Engine and emits `response_received` / `bytes_received` signals. 
-7. Engine runs downloader middleware process_response hooks (reversed order). 
-8. Engine runs spider middleware `process_spider_input` before handing the Response to the spider. 
-9. `Spider.parse(Response)` is invoked. 
-10. Spider yields `Items`, `Requests` or `URL` strings back into the spider middleware chain. 
-11. Spider middleware filters/modifies `Request` results and either forwards them to Scheduler or drops them. 
-12. Spider middleware forwards `Items` into the `Pipeline` (or emits them). 
-13. Spider middleware and/or Engine trigger follow/schedule control flows (e.g., scheduling new requests). 
-14. Engine emits observability signals (e.g., `item_scraped, request_scheduled, response_received`). 
-15. Signals are consumed by `StatsCollector` and other hooked handlers (update counters, metrics). 
-16. Signals deliver items to `Exporter` (buffering). 
-17. On `spider_closed` Signals tell `Exporter` to flush buffered items. 
+2. Scheduler receives and either enqueues or directly delivers the `Request` to Engine.
+3. Engine calls downloader middleware `process_request` hooks (pre-download processing).
+4. Downloader middleware forwards the request to `Downloader.fetch()` (possibly altering headers/meta).
+5. Downloader performs the HTTP request (connection pool, slots, timeouts).
+6. Downloader returns a `Response/Page` to Engine and emits `response_received` / `bytes_received` signals.
+7. Engine runs downloader middleware process_response hooks (reversed order).
+8. Engine runs spider middleware `process_spider_input` before handing the Response to the spider.
+9. `Spider.parse(Response)` is invoked.
+10. Spider yields `Items`, `Requests` or `URL` strings back into the spider middleware chain.
+11. Spider middleware filters/modifies `Request` results and either forwards them to Scheduler or drops them.
+12. Spider middleware forwards `Items` into the `Pipeline` (or emits them).
+13. Spider middleware and/or Engine trigger follow/schedule control flows (e.g., scheduling new requests).
+14. Engine emits observability signals (e.g., `item_scraped, request_scheduled, response_received`).
+15. Signals are consumed by `StatsCollector` and other hooked handlers (update counters, metrics).
+16. Signals deliver items to `Exporter` (buffering).
+17. On `spider_closed` Signals tell `Exporter` to flush buffered items.
 18. `Pipeline` passes items to `Exporter` for final persistence (file, database, etc.).
 19. `Exporter` writes items to disk or storage backend immediately (streaming) or buffers them.
 20. If buffering is used, items are flushed on spider close.
