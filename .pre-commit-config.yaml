@@ -13,9 +13,11 @@ repos:
       - id: fix-byte-order-marker
       - id: check-merge-conflict
       - id: check-yaml
+        exclude: ^mkdocs.yml$ # Exclude mkdocs.yml due to false positives with anchors; nov 2025.
       - id: check-toml
       - id: mixed-line-ending
       - id: name-tests-test
+        args: [--pytest-test-first]
       - id: detect-private-key
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
@@ -29,4 +31,7 @@ repos:
     rev: v1.18.2
     hooks:
     -   id: mypy
-        pass_filenames: false
+        additional_dependencies:
+          - types-PyYAML>=6.0.12.20240915
+          - types-aiofiles
+          - lxml-stubs>=0.5.1
