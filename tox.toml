@@ -1,9 +1,9 @@
-[tox]
-env_list = ["py311", "lint", "type", "precommit", "coverage"]
 requires = ["tox>=4.0"]
+env_list = ["py311", "lint", "type", "precommit", "coverage"]
 
-[testenv]
+[env_run_base]
 usedevelop = true
+
 deps = [
     # development dependencies
     "pytest>=7.0",
@@ -13,11 +13,10 @@ deps = [
     "mypy>=1.5",
     "tox>=4.32.0",
     "pre-commit>=3.0",
+    "aiofiles>=25.1.0", # async file operations
     "types-aiofiles>=23.0",
-
     # redis backend
-    "redis>=8.2.1",
-
+    "redis>=7.0.1",
     # observability
     "opentelemetry-api>=1.27.0",
     "opentelemetry-sdk>=1.27.0",
@@ -25,45 +24,46 @@ deps = [
 ]
 
 commands_pre = [
-  "python -m pip install --upgrade pip",
-  "python -m pip install -e .[dev]"
+    ["python", "-m", "pip", "install", "--upgrade", "pip"],
+    ["python", "-m", "pip", "install", "-e", ".[dev]"],
 ]
+
 setenv = { PYTHONWARNINGS = "default::DeprecationWarning" }
 passenv = ["CI", "GITHUB_ACTIONS", "GITHUB_*", "QCRAWL_*"]
 skip_install = false
 
+commands = [["pytest", "-q", "--maxfail=1"]]
 
-commands = ["pytest -q --maxfail=1"]
-
-["testenv:py311"]
+[env.py311]
 description = "Run tests on Python 3.11"
-basepython = "python3.11"
+basepython = ["python3.11"]
 
-["testenv:lint"]
+[testenv.lint]
 description = "Run linters / formatter (ruff)"
-basepython = "python3.11"
+basepython = ["python3.11"]
 commands = [
-  "ruff format --exit-zero .",
-  "ruff check ."
+    ["ruff", "format", "--exit-zero", "."],
+    ["ruff", "check", "."],
 ]
 
-["testenv:type"]
+[testenv.type]
 description = "Run static typing (mypy)"
-basepython = "python3.11"
-commands = [
-  "mypy ."
-]
+basepython = ["python3.11"]
+commands = [["mypy", "."]]
 
-["testenv:precommit"]
+[testenv.precommit]
 description = "Run pre-commit hooks"
-basepython = "python3.11"
-commands = [
-  "pre-commit run --all-files"
-]
+basepython = ["python3.11"]
+commands = [["pre-commit", "run", "--all-files"]]
 
-["testenv:coverage"]
+[testenv.coverage]
 description = "Run tests with coverage report"
-basepython = "python3.11"
+basepython = ["python3.11"]
 commands = [
-  "pytest --cov --junitxml=junit.xml -o junit_family=legacy"
+    ["pytest",
+        "--cov=qcrawl",
+        "--cov-report=term-missing",
+        "--cov-report=xml",
+        "--junitxml=junit.xml",
+        "-o", "junit_family=legacy"],
 ]
