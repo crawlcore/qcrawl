@@ -36,6 +36,7 @@ keywords = [
 # Core dependencies
 dependencies = [
     "aiohttp>=3.13.2", # async HTTP client
+    "aiofiles>=25.1.0", # async file operations
     "lxml>=6.0.2", # fast HTML/XML parsing
     "cssselect>=1.3.0", # CSS selectors for lxml
     "lxml-stubs>=0.5.1", # lxml type hints
@@ -48,7 +49,7 @@ dependencies = [
 
 # Optional dependencies (extras)
 [project.optional-dependencies]
-redis = ["redis>=8.2.1"] # alternative queue backend on Redis
+redis = ["redis>=7.0.1"] # alternative queue backend on Redis
 
 prometheus = ["prometheus-client>=0.20.0"]
 opentelemetry = [
