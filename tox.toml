@@ -38,7 +38,7 @@ commands = [["pytest", "-q", "--maxfail=1"]]
 description = "Run tests on Python 3.11"
 basepython = ["python3.11"]
 
-[testenv.lint]
+[env.lint]
 description = "Run linters / formatter (ruff)"
 basepython = ["python3.11"]
 commands = [
@@ -46,17 +46,17 @@ commands = [
     ["ruff", "check", "."],
 ]
 
-[testenv.type]
+[env.type]
 description = "Run static typing (mypy)"
 basepython = ["python3.11"]
 commands = [["mypy", "."]]
 
-[testenv.precommit]
+[env.precommit]
 description = "Run pre-commit hooks"
 basepython = ["python3.11"]
 commands = [["pre-commit", "run", "--all-files"]]
 
-[testenv.coverage]
+[env.coverage]
 description = "Run tests with coverage report"
 basepython = ["python3.11"]
 commands = [
