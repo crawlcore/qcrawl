@@ -387,9 +387,11 @@ class Settings:
 
     def to_json(self) -> bytes:
         """Fast JSON serialization using orjson (returns bytes)."""
-        return orjson.dumps(
-            self.to_dict(),
-            option=orjson.OPT_INDENT_2,
+        return bytes(
+            orjson.dumps(
+                self.to_dict(),
+                option=orjson.OPT_INDENT_2,
+            )
         )
 
     def with_overrides(

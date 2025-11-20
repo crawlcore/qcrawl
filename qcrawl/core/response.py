@@ -51,10 +51,9 @@ class Page:
 
         result = from_bytes(self.content, steps=16)
         best = result.best()
-        if best is not None and getattr(best, "encoding", None):
-            detected = best.encoding
-        else:
-            detected = "utf-8"
+        encoding = getattr(best, "encoding", None)
+
+        detected = str(encoding) if encoding else "utf-8"
 
         self._detected_encoding = detected
         return detected
