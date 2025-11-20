@@ -16,7 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        python-version: [ "3.11", "3.12", "3.13", "3.14" ]
 
     env:
       TOXENV: py
@@ -37,5 +37,8 @@ jobs:
           tox
 
       - name: Upload coverage report
-        if: ${{ success() }}
         uses: codecov/codecov-action@v5
+
+      - name: Upload test results
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@v1
