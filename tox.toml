@@ -1,5 +1,5 @@
 requires = ["tox>=4.0"]
-env_list = ["py311", "lint", "type", "precommit", "coverage"]
+env_list = ["tests", "lint", "type", "precommit", "coverage"]
 
 [env_run_base]
 usedevelop = true
@@ -34,13 +34,11 @@ skip_install = false
 
 commands = [["pytest", "-q", "--maxfail=1"]]
 
-[env.py311]
-description = "Run tests on Python 3.11"
-basepython = ["python3.11"]
+[env.tests]
+description = "Run tests"
 
 [env.lint]
 description = "Run linters / formatter (ruff)"
-basepython = ["python3.11"]
 commands = [
     ["ruff", "format", "--exit-non-zero-on-fix", "."],
     ["ruff", "check", "."],
@@ -48,17 +46,14 @@ commands = [
 
 [env.type]
 description = "Run static typing (mypy)"
-basepython = ["python3.11"]
 commands = [["mypy", "."]]
 
 [env.precommit]
 description = "Run pre-commit hooks"
-basepython = ["python3.11"]
 commands = [["pre-commit", "run", "--all-files"]]
 
 [env.coverage]
 description = "Run tests with coverage report"
-basepython = ["python3.11"]
 commands = [
     ["pytest",
         "--cov=qcrawl",
