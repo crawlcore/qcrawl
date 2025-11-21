@@ -1,15 +1,10 @@
 from __future__ import annotations
 
-import contextlib
 import logging
-import os
 from dataclasses import asdict, dataclass, field
 from enum import IntEnum
-from pathlib import Path
 
 import orjson
-import yaml
-from yarl import URL
 
 from qcrawl.middleware.base import DownloaderMiddleware, SpiderMiddleware
 from qcrawl.middleware.downloader import (
@@ -24,29 +19,13 @@ from qcrawl.middleware.spider import (
     DepthMiddleware,
     OffsiteMiddleware,
 )
+from qcrawl.utils.settings import (
+    load_config_file,
+    load_env,
+    map_keys_to_canonical,
+)
 
 logger = logging.getLogger(__name__)
-
-
-def _map_keys_to_canonical(src: dict[str, object] | None, base_keys: set[str]) -> dict[str, object]:
-    """Map incoming keys case-insensitively to canonical dataclass field names.
-
-    - Always compare keys by `.upper()` against `base_keys`.
-    - Preserve non-string keys and skip None values.
-    """
-    if not src:
-        return {}
-    upper_map = {bk.upper(): bk for bk in base_keys}
-    out: dict[str, object] = {}
-    for k, v in src.items():
-        if v is None:
-            continue
-        if not isinstance(k, str):
-            out[k] = v
-            continue
-        mapped = upper_map.get(k.upper(), k)
-        out[mapped] = v
-    return out
 
 
 class Priority(IntEnum):
@@ -64,16 +43,6 @@ class Settings:
 
     Canonical field names are UPPERCASE. Use Settings.load() to create from file/env/CLI.
     """
-
-    # Queue settings
-    QUEUE_BACKEND: str = "memory"
-    QUEUE_URL: str | None = None
-    QUEUE_KEY: str = "qcrawl:queue"
-    QUEUE_MAXSIZE: int | None = None
-
-    # Credentials (masked in repr)
-    QUEUE_USERNAME: str | None = field(default=None, repr=False)
-    QUEUE_PASSWORD: str | None = field(default=None, repr=False)
 
     # Spider settings
     CONCURRENCY: int = 10
@@ -126,6 +95,34 @@ class Settings:
         }
     )
 
+    QUEUE_BACKENDS: dict[str, dict[str, int | bool | str | None]] = field(
+        default_factory=lambda: {
+            "memory": {
+                "class": "qcrawl.core.queues.memory.MemoryPriorityQueue",
+                "maxsize": 0,
+            },
+            "redis": {
+                "class": "qcrawl.core.queues.redis.RedisQueue",
+                "maxsize": 0,
+                # if provided, this URL takes precedence over host/port/user/password
+                "url": None,
+                "host": "localhost",
+                "port": "6379",
+                "user": "user",
+                "password": "pass",
+                "namespace": "qcrawl",
+                "ssl": False,
+                "dedupe": False,
+                "update_priority": False,
+                "fingerprint_size": 16,
+                "item_ttl": 86_400,  # 1 day
+                "dedupe_ttl": 604_800,  # 7 days
+                "max_orphan_retries": 10,
+            },
+        }
+    )
+    QUEUE_BACKEND: str = "memory"
+
     # Logging
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str | None = None
@@ -147,9 +144,6 @@ class Settings:
 
         if self.MAX_RETRIES < 0:
             raise ValueError(f"max_retries must be >= 0, got {self.MAX_RETRIES}")
-
-        if self.QUEUE_MAXSIZE is not None and self.QUEUE_MAXSIZE < 0:
-            raise ValueError(f"queue_maxsize must be >= 0, got {self.QUEUE_MAXSIZE}")
 
         if self.PIPELINES is not None:
             if not isinstance(self.PIPELINES, dict):
@@ -196,23 +190,6 @@ class Settings:
             if mcph == 0:
                 logger.warning("max_connections_per_host=0 allows unlimited per host")
 
-    def get_queue_kwargs(self) -> dict[str, object]:
-        """Extract queue-specific kwargs for queue factory."""
-        kw: dict[str, object] = {}
-
-        if self.QUEUE_URL:
-            kw["url"] = self.QUEUE_URL
-        if self.QUEUE_KEY:
-            kw["key"] = self.QUEUE_KEY
-        if self.QUEUE_MAXSIZE is not None:
-            kw["maxsize"] = self.QUEUE_MAXSIZE
-        if self.QUEUE_USERNAME:
-            kw["username"] = self.QUEUE_USERNAME
-        if self.QUEUE_PASSWORD:
-            kw["password"] = self.QUEUE_PASSWORD
-
-        return kw
-
     @classmethod
     def load(cls, config_file: str | None = None, **overrides) -> Settings:
         """Load settings by applying layers onto a validated default Settings instance.
@@ -226,173 +203,63 @@ class Settings:
         Extract credentials from queue_url after layering and apply them only when
         not provided by explicit overrides.
         """
-        # Start from validated defaults
         base = cls()
 
-        base_keys = set(asdict(base).keys())
-
-        # Layer 1: Config file
         if config_file:
-            file_conf = cls._load_file(config_file)
-            file_conf_mapped = _map_keys_to_canonical(file_conf, base_keys)
-            base = base.with_overrides(file_conf_mapped, priority=Priority.CONFIG_FILE)
+            file_conf = load_config_file(config_file)
+            if not isinstance(file_conf, dict):
+                raise TypeError("Config file must yield a dict")
+            base = base.with_overrides(file_conf, priority=Priority.CONFIG_FILE)
 
-        # Layer 2: Environment variables
-        env_config = cls._load_env()
-        env_config_mapped = _map_keys_to_canonical(env_config, base_keys)
-        base = base.with_overrides(
-            {k: v for k, v in env_config_mapped.items() if v is not None}, priority=Priority.ENV
-        )
+        env_conf = load_env()
+        if env_conf:
+            base = base.with_overrides(env_conf, priority=Priority.ENV)
 
-        # Layer 3: Explicit overrides (CLI / programmatic)
-        explicit_raw = {k: v for k, v in overrides.items() if v is not None}
-        explicit_conf = _map_keys_to_canonical(explicit_raw, base_keys)
-        base = base.with_overrides(explicit_conf, priority=Priority.CLI)
-
-        # Layer 4: Extract credentials from URL if present (apply only when not explicitly provided)
-        queue_url = getattr(base, "QUEUE_URL", None)
-        if queue_url:
-            url_config = cls._extract_credentials_from_url(str(queue_url))
-            creds_updates: dict[str, object] = {}
-            if url_config.get("username") and "QUEUE_USERNAME" not in explicit_conf:
-                creds_updates["QUEUE_USERNAME"] = url_config["username"]
-            if url_config.get("password") and "QUEUE_PASSWORD" not in explicit_conf:
-                creds_updates["QUEUE_PASSWORD"] = url_config["password"]
-            # Always replace queue_url with cleaned form when it differs
-            if url_config.get("clean_url") and url_config["clean_url"] != queue_url:
-                creds_updates["QUEUE_URL"] = url_config["clean_url"]
-
-            if creds_updates:
-                base = base.with_overrides(creds_updates, priority=Priority.CONFIG_FILE)
+        explicit = {k: v for k, v in overrides.items() if v is not None}
+        if explicit:
+            base = base.with_overrides(explicit, priority=Priority.CLI)
 
         return base
 
-    @staticmethod
-    def _load_file(path: str) -> dict[str, object]:
-        """Load config from YAML or JSON file."""
-        p = Path(path)
-        if not p.exists():
-            raise FileNotFoundError(f"Config file not found: {path}")
-
-        text = p.read_text(encoding="utf-8")
-
-        if p.suffix.lower() in {".yaml", ".yml"}:
-            data = yaml.safe_load(text) or {}
-        else:
-            data = orjson.loads(text or "{}")
-
-        if not isinstance(data, dict):
-            raise TypeError(f"Config file must contain a dict, got {type(data)}")
-
-        return data
-
-    @staticmethod
-    def _load_env() -> dict[str, object]:
-        """Load settings from environment variables (namespaced only)."""
-        config: dict[str, object] = {}
-
-        # Queue settings
-        if backend := os.getenv("QCRAWL_QUEUE_BACKEND"):
-            config["QUEUE_BACKEND"] = backend
-
-        if url := os.getenv("QCRAWL_QUEUE_URL"):
-            config["QUEUE_URL"] = url
-
-        if key := os.getenv("QCRAWL_QUEUE_KEY"):
-            config["QUEUE_KEY"] = key
-
-        if user := os.getenv("QCRAWL_QUEUE_USER"):
-            config["QUEUE_USERNAME"] = user
-
-        if pwd := os.getenv("QCRAWL_QUEUE_PASS"):
-            config["QUEUE_PASSWORD"] = pwd
-
-        # Spider settings
-        if val := os.getenv("QCRAWL_CONCURRENCY"):
-            with contextlib.suppress(ValueError):
-                config["CONCURRENCY"] = int(val)
-
-        if val := os.getenv("QCRAWL_CONCURRENCY_PER_DOMAIN"):
-            with contextlib.suppress(ValueError):
-                config["CONCURRENCY_PER_DOMAIN"] = int(val)
-
-        if val := os.getenv("QCRAWL_DELAY_PER_DOMAIN"):
-            with contextlib.suppress(ValueError):
-                config["DELAY_PER_DOMAIN"] = float(val)
-
-        if val := os.getenv("QCRAWL_MAX_DEPTH"):
-            with contextlib.suppress(ValueError):
-                config["MAX_DEPTH"] = int(val)
-
-        if val := os.getenv("QCRAWL_TIMEOUT"):
-            with contextlib.suppress(ValueError):
-                config["TIMEOUT"] = float(val)
-
-        if val := os.getenv("QCRAWL_MAX_RETRIES"):
-            with contextlib.suppress(ValueError):
-                config["MAX_RETRIES"] = int(val)
-
-        if val := os.getenv("QCRAWL_QUEUE_MAXSIZE"):
-            with contextlib.suppress(ValueError):
-                config["QUEUE_MAXSIZE"] = int(val)
-
-        if val := os.getenv("QCRAWL_LOG_LEVEL"):
-            config["LOG_LEVEL"] = val
-
-        if val := os.getenv("QCRAWL_LOG_FILE"):
-            config["LOG_FILE"] = val
-
-        return config
-
-    @staticmethod
-    def _extract_credentials_from_url(url: str) -> dict[str, str | None]:
-        """Extract username/password from URL and return clean URL."""
-        try:
-            parsed = URL(url)
-
-            username = parsed.user
-            password = parsed.password
-
-            # Build clean URL without credentials
-            scheme = parsed.scheme or ""
-            host = parsed.host or ""
-            port = f":{parsed.port}" if parsed.port else ""
-            path = str(parsed.path) or ""
-            query = f"?{parsed.query_string}" if parsed.query_string else ""
-            fragment = f"#{parsed.fragment}" if parsed.fragment else ""
-
-            clean_url = f"{scheme}://{host}{port}{path}{query}{fragment}"
-
-            return {"username": username, "password": password, "clean_url": clean_url}
-        except Exception:
-            # Parse failed, return original
-            return {"username": None, "password": None, "clean_url": url}
-
     def to_dict(self) -> dict[str, object]:
-        """Serializable snapshot with masked secrets (legacy lowercase keys)."""
+        """Serializable snapshot using canonical UPPERCASE keys.
+
+        Secrets inside `QUEUE_BACKENDS` (password/pass/pwd/token/secret) are masked.
+        """
+        qb: dict[str, object] = {}
+        for name, cfg in (self.QUEUE_BACKENDS or {}).items():
+            if not isinstance(cfg, dict):
+                qb[name] = cfg
+                continue
+            safe_cfg: dict[str, object | None] = {}
+            for k, v in cfg.items():
+                if isinstance(k, str) and k.lower() in {
+                    "password",
+                    "pass",
+                    "pwd",
+                    "token",
+                    "secret",
+                }:
+                    safe_cfg[k] = "*****" if v else None
+                else:
+                    safe_cfg[k] = v
+            qb[name] = safe_cfg
+
         return {
-            "queue_backend": self.QUEUE_BACKEND,
-            "queue_url": self.QUEUE_URL,
-            "queue_key": self.QUEUE_KEY,
-            "queue_username": self.QUEUE_USERNAME,
-            "queue_password": "*****" if self.QUEUE_PASSWORD else None,
-            "concurrency": self.CONCURRENCY,
-            "concurrency_per_domain": self.CONCURRENCY_PER_DOMAIN,
-            "delay_per_domain": self.DELAY_PER_DOMAIN,
-            "max_depth": self.MAX_DEPTH,
-            "timeout": self.TIMEOUT,
-            "max_retries": self.MAX_RETRIES,
-            "log_level": self.LOG_LEVEL,
+            "QUEUE_BACKEND": self.QUEUE_BACKEND,
+            "QUEUE_BACKENDS": qb,
+            "CONCURRENCY": self.CONCURRENCY,
+            "CONCURRENCY_PER_DOMAIN": self.CONCURRENCY_PER_DOMAIN,
+            "DELAY_PER_DOMAIN": self.DELAY_PER_DOMAIN,
+            "MAX_DEPTH": self.MAX_DEPTH,
+            "TIMEOUT": self.TIMEOUT,
+            "MAX_RETRIES": self.MAX_RETRIES,
+            "LOG_LEVEL": self.LOG_LEVEL,
+            "LOG_FILE": self.LOG_FILE,
         }
 
     def to_json(self) -> bytes:
-        """Fast JSON serialization using orjson (returns bytes)."""
-        return bytes(
-            orjson.dumps(
-                self.to_dict(),
-                option=orjson.OPT_INDENT_2,
-            )
-        )
+        return bytes(orjson.dumps(self.to_dict(), option=orjson.OPT_INDENT_2))
 
     def with_overrides(
         self, overrides: dict[str, object] | None, *, priority: Priority | None = None
@@ -411,7 +278,7 @@ class Settings:
         base = asdict(self)
         merged = dict(base)
 
-        mapped = _map_keys_to_canonical(overrides, set(base.keys()))
+        mapped = map_keys_to_canonical(overrides, set(base.keys()))
 
         for k, v in mapped.items():
             if k not in base:

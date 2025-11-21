@@ -85,15 +85,8 @@ async def run(
             logger.error("Queue factory import failed: %s", e)
             raise SystemExit(2) from e
 
-        q_kwargs = {}
         try:
-            q_kwargs = runtime_settings.get_queue_kwargs()
-        except Exception:
-            q_kwargs = {}
-
-        try:
-            maybe_queue = create_queue(str(backend), **q_kwargs)
-            queue = await maybe_queue if asyncio.iscoroutine(maybe_queue) else maybe_queue
+            queue = await create_queue(str(backend))
             crawler.queue = queue
         except Exception as e:
             logger.error("Failed to create queue backend %s: %s", backend, e)
@@ -155,6 +148,7 @@ async def run(
             )
 
             # If storage backend configured, pass storage to register_export_handlers
+            # CLI args take precedence; if not provided, consult spider custom_settings.
             if storage_obj is not None:
                 register_export_handlers(
                     global_dispatcher,
