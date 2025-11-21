@@ -20,9 +20,13 @@ from qcrawl.middleware.spider import (
     OffsiteMiddleware,
 )
 from qcrawl.utils.settings import (
+    ensure_int,
+    ensure_str,
     load_config_file,
     load_env,
     map_keys_to_canonical,
+    mask_secrets,
+    shallow_merge_dicts,
 )
 
 logger = logging.getLogger(__name__)
@@ -104,7 +108,6 @@ class Settings:
             "redis": {
                 "class": "qcrawl.core.queues.redis.RedisQueue",
                 "maxsize": 0,
-                # if provided, this URL takes precedence over host/port/user/password
                 "url": None,
                 "host": "localhost",
                 "port": "6379",
@@ -115,20 +118,20 @@ class Settings:
                 "dedupe": False,
                 "update_priority": False,
                 "fingerprint_size": 16,
-                "item_ttl": 86_400,  # 1 day
-                "dedupe_ttl": 604_800,  # 7 days
+                "item_ttl": 86_400,
+                "dedupe_ttl": 604_800,
                 "max_orphan_retries": 10,
             },
         }
     )
     QUEUE_BACKEND: str = "memory"
 
-    # Logging
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str | None = None
 
     def __post_init__(self) -> None:
         """Validation only - no loading, no mutations."""
+        # Numeric ranges
         if self.CONCURRENCY < 1 or self.CONCURRENCY > 10000:
             raise ValueError(f"concurrency must be 1-10000, got {self.CONCURRENCY}")
 
@@ -145,6 +148,7 @@ class Settings:
         if self.MAX_RETRIES < 0:
             raise ValueError(f"max_retries must be >= 0, got {self.MAX_RETRIES}")
 
+        # PIPELINES
         if self.PIPELINES is not None:
             if not isinstance(self.PIPELINES, dict):
                 raise TypeError("pipelines must be dict or None")
@@ -152,13 +156,16 @@ class Settings:
                 if not isinstance(v, int):
                     raise TypeError(f"pipelines[{k}] must be int")
 
+        # DEFAULT_REQUEST_HEADERS keys/values must be str
         if self.DEFAULT_REQUEST_HEADERS is not None:
             if not isinstance(self.DEFAULT_REQUEST_HEADERS, dict):
                 raise TypeError("DEFAULT_REQUEST_HEADERS must be dict or None")
             for hk, hv in self.DEFAULT_REQUEST_HEADERS.items():
-                if not isinstance(hk, str) or not isinstance(hv, str):
-                    raise TypeError("DEFAULT_REQUEST_HEADERS keys and values must be str")
+                # use ensure_str to validate/coerce for safety (will raise on invalid)
+                ensure_str(hk, "DEFAULT_REQUEST_HEADERS key")
+                ensure_str(hv, "DEFAULT_REQUEST_HEADERS value")
 
+        # DOWNLOADER_SETTINGS validation and keys
         if self.DOWNLOADER_SETTINGS is not None:
             if not isinstance(self.DOWNLOADER_SETTINGS, dict):
                 raise TypeError("DOWNLOADER_SETTINGS must be dict or None")
@@ -171,7 +178,7 @@ class Settings:
                 "keepalive_timeout",
                 "force_close_after",
             }
-            invalid = self.DOWNLOADER_SETTINGS.keys() - valid_keys
+            invalid = set(self.DOWNLOADER_SETTINGS.keys()) - valid_keys
             if invalid:
                 raise ValueError(f"Invalid DOWNLOADER_SETTINGS keys: {invalid}")
 
@@ -182,10 +189,10 @@ class Settings:
 
             mc = self.DOWNLOADER_SETTINGS["max_connections"]
             mcph = self.DOWNLOADER_SETTINGS["max_connections_per_host"]
-            if not isinstance(mc, int):
-                raise TypeError("max_connections must be int")
-            if not isinstance(mcph, int):
-                raise TypeError("max_connections_per_host must be int")
+
+            # Use ensure_int to validate numeric types (will raise on invalid)
+            ensure_int(mc, "max_connections")
+            ensure_int(mcph, "max_connections_per_host")
 
             if mcph == 0:
                 logger.warning("max_connections_per_host=0 allows unlimited per host")
@@ -199,9 +206,6 @@ class Settings:
           - config file (Priority.CONFIG_FILE)
           - environment (Priority.ENV)
           - explicit overrides passed to this function (Priority.CLI)
-
-        Extract credentials from queue_url after layering and apply them only when
-        not provided by explicit overrides.
         """
         base = cls()
 
@@ -224,26 +228,14 @@ class Settings:
     def to_dict(self) -> dict[str, object]:
         """Serializable snapshot using canonical UPPERCASE keys.
 
-        Secrets inside `QUEUE_BACKENDS` (password/pass/pwd/token/secret) are masked.
+        Secrets inside `QUEUE_BACKENDS` are masked via `mask_secrets`.
         """
         qb: dict[str, object] = {}
         for name, cfg in (self.QUEUE_BACKENDS or {}).items():
             if not isinstance(cfg, dict):
                 qb[name] = cfg
                 continue
-            safe_cfg: dict[str, object | None] = {}
-            for k, v in cfg.items():
-                if isinstance(k, str) and k.lower() in {
-                    "password",
-                    "pass",
-                    "pwd",
-                    "token",
-                    "secret",
-                }:
-                    safe_cfg[k] = "*****" if v else None
-                else:
-                    safe_cfg[k] = v
-            qb[name] = safe_cfg
+            qb[name] = mask_secrets(cfg)
 
         return {
             "QUEUE_BACKEND": self.QUEUE_BACKEND,
@@ -276,10 +268,11 @@ class Settings:
             return self
 
         base = asdict(self)
-        merged = dict(base)
 
         mapped = map_keys_to_canonical(overrides, set(base.keys()))
 
+        # Warn on unknown keys and collect only known ones for application
+        known_applied: dict[str, object] = {}
         for k, v in mapped.items():
             if k not in base:
                 if priority:
@@ -289,17 +282,13 @@ class Settings:
                 else:
                     logger.warning("Ignoring unknown setting %r in overrides", k)
                 continue
+            known_applied[k] = v
 
-            cur = base[k]
-            if isinstance(cur, dict) and isinstance(v, dict):
-                new = dict(cur)
-                new.update(v)
-                merged[k] = new
-            else:
-                merged[k] = v
+        # Shallow-merge dict-valued settings using helper
+        merged = shallow_merge_dicts(base, known_applied)
 
         try:
-            return type(self)(**merged)
+            return type(self)(**merged)  # type: ignore[arg-type]
         except Exception:
             if priority:
                 logger.exception(

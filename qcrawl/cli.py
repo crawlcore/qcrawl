@@ -1,23 +1,32 @@
-from __future__ import annotations
-
 import argparse
 import asyncio
 import importlib
 import logging
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
 
 import orjson
-import yaml
 
 from qcrawl.core.spider import Spider
 from qcrawl.runner import ensure_output_dir, run_async, setup_logging
 from qcrawl.settings import Settings as RuntimeSettings
-from qcrawl.utils.env import parse_literal
+from qcrawl.utils.settings import parse_literal
 
 
 def main() -> None:
+    """CLI entrypoint for `qcrawl`.
+
+    Responsibilities:
+        - Parse CLI arguments.
+        - Configure logging and output directories.
+        - Load spider config from a TOML file (if provided).
+        - Build runtime `Settings` snapshot and import the spider class.
+        - Run the crawl using the async runner.
+
+    Exits with SystemExit on fatal errors.
+    """
     args = parse_args()
     setup_logging(args.log_level, args.log_file)
     ensure_output_dir(args.export)
@@ -50,6 +59,15 @@ def main() -> None:
 
 @dataclass
 class SpiderConfig:
+    """Simple container for per-spider configuration loaded from file or CLI.
+
+    Fields:
+      - spider_args: dict of constructor args / spider attributes to set.
+      - concurrency, concurrency_per_domain, delay_per_domain, max_depth: optional runtime hints.
+
+    Use `from_file()` to load configuration from a TOML file and `merge_cli()` to apply CLI-supplied overrides.
+    """
+
     spider_args: dict[str, object] = field(default_factory=dict)
     concurrency: int | None = None
     concurrency_per_domain: int | None = None
@@ -57,19 +75,34 @@ class SpiderConfig:
     max_depth: int | None = None
 
     @classmethod
-    def from_file(cls, path: str) -> SpiderConfig:
+    def from_file(cls, path: str) -> "SpiderConfig":
+        """Load spider configuration from a TOML file.
+
+        The file must be a TOML document with a top-level mapping (suffix `.toml`).
+
+        Returns:
+            SpiderConfig instance populated from file data.
+
+        Raises:
+            FileNotFoundError if the file does not exist.
+            ValueError if the file is not a TOML file.
+            Any parsing exceptions from `tomllib`.
+        """
         p = Path(path)
         if not p.exists():
             raise FileNotFoundError(f"Settings file not found: {path}")
+        if p.suffix.lower() != ".toml":
+            raise ValueError("Settings file must be a TOML file with a .toml suffix")
         text = p.read_text(encoding="utf-8")
-        if p.suffix.lower() in {".yaml", ".yml"}:
-            data = yaml.safe_load(text) or {}
-        else:
-            data = orjson.loads(text)
+        data = tomllib.loads(text) or {}
         return cls.from_dict(data)
 
     @classmethod
-    def from_dict(cls, data: dict[str, object]) -> SpiderConfig:
+    def from_dict(cls, data: dict[str, object]) -> "SpiderConfig":
+        """Create SpiderConfig from a plain mapping.
+
+        Performs permissive numeric coercion for concurrency/time values.
+        """
         spider_args = data.get("spider_args", {})
         if not isinstance(spider_args, dict):
             spider_args = {}
@@ -93,6 +126,12 @@ class SpiderConfig:
         )
 
     def merge_cli(self, args: argparse.Namespace) -> None:
+        """Merge CLI `--setting` pairs and explicit CLI flags into this config.
+
+        CLI `-s KEY=VALUE` entries are appended to `spider_args`. Explicit flags
+        like `--concurrency` override the corresponding attribute and are also
+        copied into `spider_args`.
+        """
         for key, value in getattr(args, "setting", []):
             self.spider_args[key] = value
         for attr in ("concurrency", "concurrency_per_domain", "delay_per_domain", "max_depth"):
@@ -102,26 +141,37 @@ class SpiderConfig:
                 self.spider_args[attr] = val
 
 
-def _parse_kv(s: str) -> tuple[str, object]:
-    if "=" not in s:
-        raise argparse.ArgumentTypeError("must be KEY=VALUE")
-    key, val = s.split("=", 1)
-    key = key.strip()
-    raw = val.strip()
-
-    if raw.startswith("{") or raw.startswith("["):
-        try:
-            return key, orjson.loads(raw)
-        except Exception:
-            pass
-    return key, parse_literal(raw)
-
-
 class KeyValueListAction(argparse.Action):
-    """Argparse action that accepts a single KEY=VALUE string per `-s` invocation.
-    Append (key, value) tuples to the destination list. Use multiple `-s` flags
-    to provide multiple settings.
+    """Argparse action that accumulates `KEY=VALUE` pairs into a list.
+
+    Stores a list of `(key, value)` tuples on the destination attribute.
+    Values are parsed via the private `_parse_kv` helper.
     """
+
+    @staticmethod
+    def _parse_kv(s: str) -> tuple[str, object]:
+        """Parse a single KEY=VALUE string used by the `--setting` option.
+
+        Behaviour:
+          - KEY and VALUE are split at the first '='.
+          - If VALUE starts with '{' or '[', attempt JSON parse (orjson).
+          - Otherwise use `parse_literal` to coerce booleans/numbers/None/strings.
+
+        Raises:
+          argparse.ArgumentTypeError on malformed input.
+        """
+        if "=" not in s:
+            raise argparse.ArgumentTypeError("must be KEY=VALUE")
+        key, val = s.split("=", 1)
+        key = key.strip()
+        raw = val.strip()
+
+        if raw.startswith("{") or raw.startswith("["):
+            try:
+                return key, orjson.loads(raw)
+            except Exception:
+                pass
+        return key, parse_literal(raw)
 
     def __call__(self, parser, namespace, values, option_string=None):
         if getattr(namespace, self.dest, None) is None:
@@ -130,13 +180,23 @@ class KeyValueListAction(argparse.Action):
         if not isinstance(values, str):
             raise argparse.ArgumentTypeError("Invalid setting value")
         try:
-            pair = _parse_kv(values)
+            pair = self._parse_kv(values)
         except Exception as e:
             raise argparse.ArgumentError(self, f"Invalid setting {values!r}: {e}") from e
         target.append(pair)
 
 
 def load_spider_class(path: str) -> type[Spider]:
+    """Import and return a Spider class given a dotted/path string.
+
+    Accepted formats:
+      - module:Class (preferred)
+      - module.Class
+      - module (module must export a Spider subclass named `Spider`)
+
+    Raises:
+      ImportError / TypeError on failure.
+    """
     if ":" in path:
         mod_name, cls_name = path.split(":", 1)
     elif "." in path:
@@ -154,6 +214,11 @@ def load_spider_class(path: str) -> type[Spider]:
 
 
 def parse_args() -> argparse.Namespace:
+    """Construct and parse the command-line arguments for the CLI.
+
+    Returns:
+      argparse.Namespace with parsed values.
+    """
     parser = argparse.ArgumentParser(
         description="Run a qcrawl Spider", formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
@@ -181,7 +246,7 @@ def parse_args() -> argparse.Namespace:
     g_config = parser.add_argument_group("Configuration")
     g_config.add_argument(
         "--settings-file",
-        help="Load settings from JSON/YAML (applies to runtime Settings and spider config)",
+        help="Load settings from TOML (applies to runtime Settings and spider config).",
     )
 
     g_log = parser.add_argument_group("Logging & Debugging")

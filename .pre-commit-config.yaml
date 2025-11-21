@@ -32,6 +32,5 @@ repos:
     hooks:
     -   id: mypy
         additional_dependencies:
-          - types-PyYAML>=6.0.12.20240915
           - types-aiofiles
           - lxml-stubs>=0.5.1

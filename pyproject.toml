@@ -42,7 +42,6 @@ dependencies = [
     "yarl>=1.22.0", # URL handling
     "orjson>=3.11.4", # JSON library
     "charset-normalizer>=3.4.4", # encoding detection
-    "PyYAML>=6.0", # YAML parsing
 ]
 
 # Optional dependencies (extras)
@@ -67,7 +66,6 @@ dev = [
     "pre-commit>=3.0",
     "types-aiofiles>=23.0",
     "lxml-stubs>=0.5.1", # lxml type hints
-    "types-PyYAML>=6.0.12.20250915", # PyYAML type hints
 ]
 
 docs = ["mkdocs-material>=9.6.23"]

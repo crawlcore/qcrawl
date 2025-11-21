@@ -122,9 +122,9 @@ async def create_queue(backend: str = "memory") -> RequestQueue:
         return RedisQueue(
             url=url or "redis://localhost:6379/0",
             namespace=namespace,
-            ssl=ssl,
-            dedupe=dedupe,
-            update_priority=update_priority,
+            ssl=ssl if ssl is not None else False,
+            dedupe=dedupe if dedupe is not None else False,
+            update_priority=update_priority if update_priority is not None else False,
             fingerprint_size=fingerprint_size,
             item_ttl=item_ttl,
             dedupe_ttl=dedupe_ttl,
