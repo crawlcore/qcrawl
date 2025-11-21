@@ -9,7 +9,7 @@ qCrawl has the following precedence order for applying settings:
 
 ``` mermaid
 flowchart LR
-    A(qCrawl defaults) --> B(YAML Config file) --> C(Environment variables) --> D(CLI) --> E(Programmatic overrides)
+    A(qCrawl defaults) --> B(TOML Config file) --> C(Environment variables) --> D(CLI) --> E(Programmatic overrides)
 ```
 
 ## Best practices
@@ -17,21 +17,21 @@ qCrawls defaults are not supposed to be changed for per-project needs. Instead, 
 as intended:
 
 
-### YML Config file
-* Use a config file (e.g., `config.yaml`) for project-wide reproducible settings.
+### TOML Config file
+* Use a config file (e.g., `config.toml`) for project-wide reproducible settings.
 * Store non-sensitive settings like queue backend type, concurrency limits, timeouts.
-* Load config file via `Settings.load(config_file="config.yaml")`.
+* Load config file via `Settings.load(config_file="config.toml")`.
 
 Example usage:
-```yaml title="config.yaml"
-# Use: runtime_settings = Settings.load(config_file="config.yaml")
+```toml title="config.toml"
+# Use: runtime_settings = Settings.load(config_file="config.toml")
 
-CONCURRENCY: 20
-CONCURRENCY_PER_DOMAIN: 4
-DELAY_PER_DOMAIN: 0.5
-TIMEOUT: 45.0
-MAX_RETRIES: 5
-USER_AGENT: "MyCrawler/1.0"
+CONCURRENCY = 20
+CONCURRENCY_PER_DOMAIN = 4
+DELAY_PER_DOMAIN = 0.5
+TIMEOUT = 45.0
+MAX_RETRIES = 5
+USER_AGENT = "MyCrawler/1.0"
 ```
 
 ### Environment variables
@@ -103,29 +103,30 @@ class MySpider(Spider):
 | `QUEUE_BACKEND`   | `str`   | `memory`   | Set which backend from `QUEUE_BACKENDS` (`memory`, `redis`, or custom) to use |
 | `QUEUE_BACKENDS`  | `dict`  | see below  | Mapping of backend name → backend config template                             |
 
-```yaml
-QUEUE_BACKENDS:
-  memory:
-    class: "qcrawl.core.queues.memory.MemoryPriorityQueue"
-    maxsize: 0 # 0 = unlimited
+```toml
+QUEUE_BACKEND = "memory"  # or "redis"
 
-  redis:
-    class: "qcrawl.core.queues.redis.RedisQueue"
-    #url: null # optional full connection URL (overrides host/port/user/password)
-    host: "localhost"
-    port: "6379"
-    user: "user"
-    password: "pass"
-    namespace: "qcrawl"
-    ssl: false
-    maxsize: 0 # 0 = unlimited
-    dedupe: false
-    update_priority: false
-    fingerprint_size: 16
-    item_ttl: 86400 # seconds, 0 = no expiration
-    dedupe_ttl: 604800 # seconds, 0 = no expiration
-    max_orphan_retries: 10
-    redis_kwargs: {} # driver-specific options passed to redis client
+[QUEUE_BACKENDS.memory]
+class = "qcrawl.core.queues.memory.MemoryPriorityQueue"
+maxsize = 0 # 0 = unlimited
+
+[QUEUE_BACKENDS.redis]
+class = "qcrawl.core.queues.redis.RedisQueue"
+# url = ""  # optional full connection URL (overrides host/port/user/password)
+host = "localhost"
+port = "6379"
+user = "user"
+password = "pass"
+namespace = "qcrawl"
+ssl = false
+maxsize = 0 # 0 = unlimited
+dedupe = false
+update_priority = false
+fingerprint_size = 16
+item_ttl = 86400 # seconds, 0 = no expiration
+dedupe_ttl = 604800 # seconds, 0 = no expiration
+max_orphan_retries = 10
+redis_kwargs = {} # driver-specific options passed to redis client
 ```
 
 ### Spider settings
