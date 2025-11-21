@@ -1,4 +1,8 @@
-<img src="docs/assets/crawl.svg" alt="qCrawl Logo" style="min-width:75%;" />
+<img src="https://www.qcrawl.org/assets/crawl.svg" alt="qCrawl Logo" style="min-width:75%;" />
+
+![PyPI Version](https://img.shields.io/pypi/v/requests.svg?style=for-the-badge)
+![PyPI - Python Version](https://img.shields.io/pypi/pyversions/requests.svg?style=for-the-badge)
+![Codecov](https://img.shields.io/codecov/c/github/crawlcore/qcrawl?style=for-the-badge)
 
 [qcrawl](https://www.qcrawl.org) is a fast async web crawling & scraping framework for Python to extract structured data from web-pages.
 It is cross-platform and easy to install via `pip`, `conda`, or OS packages.
