@@ -9,7 +9,7 @@ qCrawl has the following precedence order for applying settings:
 
 ``` mermaid
 flowchart LR
-    A(qCrawl defaults) --> B(YML Config file) --> C(Environment variables) --> D(CLI) --> E(Programmatic overrides)
+    A(qCrawl defaults) --> B(YAML Config file) --> C(Environment variables) --> D(CLI) --> E(Programmatic overrides)
 ```
 
 ## Best practices
@@ -24,12 +24,14 @@ as intended:
 
 Example usage:
 ```yaml title="config.yaml"
-queue_backend: redis
-queue_url: redis://localhost:6379/0
-queue_key: qcrawl:queue
-concurrency: 50
-delay_per_domain: 0.1
-log_level: DEBUG
+# Use: runtime_settings = Settings.load(config_file="config.yaml")
+
+CONCURRENCY: 20
+CONCURRENCY_PER_DOMAIN: 4
+DELAY_PER_DOMAIN: 0.5
+TIMEOUT: 45.0
+MAX_RETRIES: 5
+USER_AGENT: "MyCrawler/1.0"
 ```
 
 ### Environment variables
@@ -37,8 +39,12 @@ Use environment variables for deployment/CI values and secrets.
 
 Example usage:
 ```bash
-export QCRAWL_QUEUE_URL="redis://mypassword@redis-server:6379/0"
-export QCRAWL_LOG_LEVEL="INFO"
+export QCRAWL_CONCURRENCY="20"
+export QCRAWL_CONCURRENCY_PER_DOMAIN="4"
+export QCRAWL_DELAY_PER_DOMAIN="0.5"
+export QCRAWL_TIMEOUT="45.0"
+export QCRAWL_MAX_RETRIES="5"
+export QCRAWL_USER_AGENT="MyCrawler/1.0"
 ```
 
 !!! warning
@@ -51,10 +57,13 @@ Use CLI arguments for CI test jobs or quick overrides for one-off runs.
 
 Example usage:
 ```bash
-qcrawl quotes_spider:QuotesSpider \
-  --concurrency 10 \
-  --output output.json \
-  --format json
+qcrawl mypackage.spiders:QuotesSpider \
+  -s CONCURRENCY=20 \
+  -s CONCURRENCY_PER_DOMAIN=4 \
+  -s DELAY_PER_DOMAIN=0.5 \
+  -s TIMEOUT=45.0 \
+  -s MAX_RETRIES=5 \
+  -s USER_AGENT="MyCrawler/1.0"
 ```
 
 !!! warning
@@ -67,30 +76,57 @@ Use per-spider class attributes, constructor args, or `custom_settings` for fine
 
 Example usage:
 ```python
+from qcrawl.core.spider import Spider
+
 class MySpider(Spider):
     name = "my_spider"
+    start_urls = ["https://example.com"]
 
     custom_settings = {
-        "concurrency": 10,
-        "fingerprint_algorithm": "sha256",
-        "default_headers": {
-            "User-Agent": "qCrawl/1.0"
-        }
+        "CONCURRENCY": 20,
+        "CONCURRENCY_PER_DOMAIN": 4,
+        "DELAY_PER_DOMAIN": 0.5,
+        "TIMEOUT": 45.0,
+        "MAX_RETRIES": 5,
+        "USER_AGENT": "MyCrawler/1.0",
     }
+
+    async def parse(self, response):
+        ...
 ```
 
 ## Settings reference
 
 ### Queue settings
-| Setting          | Type   | Default          | Env variable           | Validation              |
-|------------------|--------|------------------|------------------------|-------------------------|
-| `queue_backend`  | `str`  | `memory`         | `QCRAWL_QUEUE_BACKEND` | [`'memory'`, `'redis'`] |
-| `queue_url`      | `str ` | `None`           | `QCRAWL_QUEUE_URL`     |                         |
-| `queue_key`      | `str`  | `'qcrawl:queue'` | `QCRAWL_QUEUE_KEY`     |                         |
-| `queue_maxsize`  | `int ` | `None`           | `QCRAWL_QUEUE_MAXSIZE` | must be >= 0 or null    |
-| `queue_username` | `str`  | `None`           | `QCRAWL_QUEUE_USER`    |                         |
-| `queue_password` | `str`  | `None`           | `QCRAWL_QUEUE_PASS`    |                         |
+| Setting           | Type    | Default    | Notes                                                                         |
+|-------------------|---------|------------|-------------------------------------------------------------------------------|
+| `QUEUE_BACKEND`   | `str`   | `memory`   | Set which backend from `QUEUE_BACKENDS` (`memory`, `redis`, or custom) to use |
+| `QUEUE_BACKENDS`  | `dict`  | see below  | Mapping of backend name → backend config template                             |
 
+```yaml
+QUEUE_BACKENDS:
+  memory:
+    class: "qcrawl.core.queues.memory.MemoryPriorityQueue"
+    maxsize: 0 # 0 = unlimited
+
+  redis:
+    class: "qcrawl.core.queues.redis.RedisQueue"
+    #url: null # optional full connection URL (overrides host/port/user/password)
+    host: "localhost"
+    port: "6379"
+    user: "user"
+    password: "pass"
+    namespace: "qcrawl"
+    ssl: false
+    maxsize: 0 # 0 = unlimited
+    dedupe: false
+    update_priority: false
+    fingerprint_size: 16
+    item_ttl: 86400 # seconds, 0 = no expiration
+    dedupe_ttl: 604800 # seconds, 0 = no expiration
+    max_orphan_retries: 10
+    redis_kwargs: {} # driver-specific options passed to redis client
+```
 
 ### Spider settings
 | Setting                  | Type       | Default        | Env variable                     | Validation          |
@@ -98,7 +134,7 @@ class MySpider(Spider):
 | `concurrency`            | `int`      | `10`           | `QCRAWL_CONCURRENCY`             | must be 1-10000     |
 | `concurrency_per_domain` | `int`      | `2`            | `QCRAWL_CONCURRENCY_PER_DOMAIN`  | must be >= 1        |
 | `delay_per_domain`       | `float`    | `0.25`         | `QCRAWL_DELAY_PER_DOMAIN`        | must be >= 0        |
-| `max_depth`              | `int`      | `None`         | `QCRAWL_MAX_DEPTH`               |                     |
+| `max_depth`              | `int`      | `0`            | `QCRAWL_MAX_DEPTH`               |                     |
 | `timeout`                | `float`    | `30.0`         | `QCRAWL_TIMEOUT`                 | must be > 0         |
 | `max_retries`            | `int`      | `3`            | `QCRAWL_MAX_RETRIES`             | must be >= 0        |
 | `user_agent`             | `str`      | `'qCrawl/1.0'` | `QCRAWL_USER_AGENT`              |                     |
