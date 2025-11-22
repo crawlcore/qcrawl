@@ -1,6 +1,7 @@
 import logging
 from dataclasses import dataclass, field
 
+from qcrawl.core._msgspec import encode_request
 from qcrawl.utils.url import normalize_url
 
 logger = logging.getLogger(__name__)
@@ -61,10 +62,39 @@ class Request:
             # Intentionally exclude `body` for readability in debug dumps
         }
 
-    def to_bytes(self) -> bytes: ...  # type: ignore[empty-body]
+    def to_bytes(self) -> bytes:
+        """Serialize Request to MessagePack bytes via the shared encoder."""
+        try:
+            return encode_request(self)
+        except ImportError as exc:
+            raise ImportError(
+                "msgspec is required to serialize requests with msgpack. "
+                "Install with: pip install 'qcrawl[redis]'"
+            ) from exc
 
     @classmethod
-    def from_bytes(cls, data: bytes) -> "Request": ...  # type: ignore[empty-body]
+    def from_bytes(cls, data: bytes) -> "Request":
+        """Deserialize MessagePack bytes produced by `to_bytes()` back into Request."""
+        if not isinstance(data, bytes):
+            raise TypeError("Request.from_bytes expects bytes")
+
+        try:
+            from qcrawl.core._msgspec import decode_request
+        except Exception as exc:
+            raise ImportError(
+                "msgspec is required to deserialize requests with msgpack. "
+                "Install with: pip install 'qcrawl[redis]'"
+            ) from exc
+
+        req = decode_request(data)
+
+        if not isinstance(req, cls):
+            raise TypeError(
+                f"Decoded request type mismatch: expected {cls.__name__}, got {type(req).__name__}. "
+                "Ensure the same class is used for to_bytes()/from_bytes() and the centralized decoder."
+            )
+
+        return req
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> "Request":
@@ -76,10 +106,9 @@ class Request:
         - `headers` must be a dict; values are coerced to `str`.
         - `meta` must be a dict; shallow-copied.
         - `method` coerced to `str`.
-        - `body` if present must be `bytes`. Other types (including `bytearray` or
-          base64-encoded strings) are rejected.
+        - `body` if present must be `bytes`.
 
-        This method is defensive and raises `TypeError` for malformed input.
+        Raises TypeError on malformed input.
         """
         if not isinstance(data, dict):
             raise TypeError("Request.from_dict expects a dict")

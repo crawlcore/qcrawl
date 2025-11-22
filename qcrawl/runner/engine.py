@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import argparse
 import asyncio
 import contextlib
 import logging
+import typing
 from pathlib import Path
 
 from qcrawl import signals
+from qcrawl.core import Spider
 from qcrawl.core.crawler import Crawler
+from qcrawl.core.queues.factory import create_queue
 from qcrawl.runner.export import build_exporter, register_export_handlers
 from qcrawl.runner.pipelines import wire_pipeline_manager
 from qcrawl.settings import Settings as RuntimeSettings
@@ -15,14 +19,17 @@ from qcrawl.storage import FileStorage, Storage
 logger = logging.getLogger(__name__)
 
 
+if typing.TYPE_CHECKING:
+    from types import SimpleNamespace
+
 # Guard to prevent accidental re-entrant/duplicate runs in the same process.
 _run_lock: asyncio.Lock | None = None
 
 
 async def run(
-    spider_cls,
-    args,
-    spider_settings: object | None,
+    spider_cls: type[Spider],
+    args: argparse.Namespace,
+    spider_settings: SimpleNamespace | None,
     runtime_settings: RuntimeSettings,
 ) -> None:
     global _run_lock
@@ -75,18 +82,33 @@ async def run(
             with contextlib.suppress(Exception):
                 setattr(spider, key, val)
 
+        # Enforce runtime_settings type (fail-fast for programmatic callers)
+        if not isinstance(runtime_settings, RuntimeSettings):
+            raise TypeError("runtime_settings must be a RuntimeSettings instance")
+
         crawler = Crawler(spider, runtime_settings=runtime_settings)
 
         # create queue backend
         backend = getattr(runtime_settings, "QUEUE_BACKEND", None) or "memory"
-        try:
-            from qcrawl.core.queues.factory import create_queue
-        except Exception as e:
-            logger.error("Queue factory import failed: %s", e)
-            raise SystemExit(2) from e
 
         try:
-            queue = await create_queue(str(backend))
+            backend_str = str(backend).strip()
+
+            # Lookup named backend config in runtime Settings (no dict compatibility layer)
+            backends_map = getattr(runtime_settings, "QUEUE_BACKENDS", None) or {}
+
+            cfg = backends_map.get(backend_str.lower().strip())
+            if not cfg or not isinstance(cfg, dict):
+                raise ValueError(f"Unknown queue backend: {backend_str!r}")
+
+            cls_path = cfg.get("class")
+            if not cls_path or not isinstance(cls_path, str):
+                raise ValueError(f"Configured backend {backend_str!r} has no valid 'class' entry")
+
+            # Forward all keys except 'class' as constructor kwargs
+            init_kwargs = {k: v for k, v in cfg.items() if k != "class"}
+
+            queue = await create_queue(str(cls_path), **init_kwargs)
             crawler.queue = queue
         except Exception as e:
             logger.error("Failed to create queue backend %s: %s", backend, e)
@@ -155,7 +177,8 @@ async def run(
                     exporter,
                     pipeline_mgr,
                     crawler,
-                    storage_obj,
+                    storage=storage_obj,
+                    file_path=None,
                     storage_relpath=storage_relpath,
                 )
                 try:
@@ -175,11 +198,16 @@ async def run(
                         "Could not ensure parent directory for export path %s", export_path
                     )
 
-                # Pass the path string (including '-'/'stdout') so register_export_handlers
+                # Pass the Path (including '-'/'stdout' as Path('-')) so register_export_handlers
                 # can open via aiofiles or route to stdout.
                 try:
                     register_export_handlers(
-                        global_dispatcher, exporter, pipeline_mgr, crawler, str(export_path)
+                        global_dispatcher,
+                        exporter,
+                        pipeline_mgr,
+                        crawler,
+                        storage=None,
+                        file_path=Path(export_path),
                     )
                     try:
                         await crawler.crawl()
@@ -189,10 +217,3 @@ async def run(
                 except Exception as e:
                     logger.exception("Failed to prepare/open export %s: %s", export_path, e)
                     raise
-        else:
-            # No exporter, still run with pipeline_mgr present
-            try:
-                await crawler.crawl()
-            except Exception:
-                logger.exception("Run failed")
-                raise

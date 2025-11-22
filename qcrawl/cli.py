@@ -5,7 +5,7 @@ import logging
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import orjson
 
@@ -51,7 +51,8 @@ def main() -> None:
         raise SystemExit(2) from e
 
     try:
-        asyncio.run(run_async(spider_cls, args, settings, runtime_settings))
+        spider_settings_ns = SimpleNamespace(spider_args=settings.spider_args)
+        asyncio.run(run_async(spider_cls, args, spider_settings_ns, runtime_settings))
     except KeyboardInterrupt:
         print("\nInterrupted, exiting...")
         raise SystemExit(130) from None

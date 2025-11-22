@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import ItemsView, KeysView, ValuesView
+
 
 class Item:
     """Container for scraped fields and internal metadata.
@@ -36,7 +38,7 @@ class Item:
     __slots__ = ("_data", "_metadata")
 
     def __init__(
-        self, data: dict[str, object] | None = None, metadata: dict[str, object] | None = None
+        self, data: dict[str, str] | None = None, metadata: dict[str, str] | None = None
     ) -> None:
         """Create a new Item (scraped fields and internal metadata).
 
@@ -47,11 +49,11 @@ class Item:
         Raises:
             None. Defensive callers should validate their inputs before constructing.
         """
-        self._data: dict[str, object] = data or {}
-        self._metadata: dict[str, object] = metadata or {}
+        self._data: dict[str, str] = data or {}
+        self._metadata: dict[str, str] = metadata or {}
 
     @property
-    def data(self) -> dict[str, object]:
+    def data(self) -> dict[str, str]:
         """Return the main data mapping (scraped fields e.g., title, price).
 
         Mutating the returned dict changes the Item in-place.
@@ -59,20 +61,20 @@ class Item:
         return self._data
 
     @property
-    def metadata(self) -> dict[str, object]:
+    def metadata(self) -> dict[str, str]:
         """Return the internal metadata mapping (e.g., crawler depth, timestamp)."""
         return self._metadata
 
     def __repr__(self) -> str:
         return f"Item(data={self._data!r}, metadata={self._metadata!r})"
 
-    def __getitem__(self, key: str) -> object:
+    def __getitem__(self, key: str) -> str:
         return self._data[key]
 
-    def __setitem__(self, key: str, value: object) -> None:
+    def __setitem__(self, key: str, value: str) -> None:
         self._data[key] = value
 
-    def get(self, key: str, default: object = None) -> object:
+    def get(self, key: str, default: str) -> str:
         """Return `.data.get(key, default)`.
 
         Convenience wrapper matching the dict API.
@@ -89,14 +91,14 @@ class Item:
     def __contains__(self, key: str) -> bool:
         return key in self._data
 
-    def keys(self):
+    def keys(self) -> KeysView[str]:
         """Return a view over `.data` keys."""
         return self._data.keys()
 
-    def values(self):
+    def values(self) -> ValuesView[str]:
         """Return a view over `.data` values."""
         return self._data.values()
 
-    def items(self):
+    def items(self) -> ItemsView[str, str]:
         """Iterate over field names (keys) in `.data` to support `for k in item`."""
         return self._data.items()

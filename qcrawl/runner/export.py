@@ -1,21 +1,30 @@
+# python
+# File: `qcrawl/runner/export.py`
+
+from __future__ import annotations
+
 import asyncio
 import contextlib
 import logging
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import aiofiles
 
-from qcrawl import formatter as _exporter
+from qcrawl import exporters as _exporter
 from qcrawl import signals
 from qcrawl.pipelines.manager import PipelineManager
 from qcrawl.storage import Storage
 
 logger = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from qcrawl.core.item import Item
+    from qcrawl.core.spider import Spider
+
 
 def _sync_write_bytes(file_obj: object, data: bytes) -> None:
-    """Small sync helper used for stdout fallback via asyncio.to_thread."""
     if data is None:
         return
     try:
@@ -32,7 +41,6 @@ def _sync_write_bytes(file_obj: object, data: bytes) -> None:
 
 
 async def _write_to_storage(storage: Storage, relpath: str, data: bytes | str | None) -> None:
-    """Write bytes to Storage backend. Coerce to bytes and call storage.write(path)."""
     if data is None:
         return
     b = data.encode("utf-8") if isinstance(data, str) else bytes(data)
@@ -42,7 +50,9 @@ async def _write_to_storage(storage: Storage, relpath: str, data: bytes | str | 
         logger.exception("Failed to write export data to storage %s", relpath)
 
 
-def build_exporter(format: str | None, mode: str = "buffered", buffer_size: int = 500):
+def build_exporter(
+    format: str | None, mode: str = "buffered", buffer_size: int = 500
+) -> _exporter.Exporter:
     """Return an exporter instance for the given format/mode."""
     fmt = (format or "").lower()
     m = (mode or "").lower()
@@ -63,40 +73,32 @@ def build_exporter(format: str | None, mode: str = "buffered", buffer_size: int 
 
 def register_export_handlers(
     dispatcher: signals.SignalDispatcher,
-    exporter,
+    exporter: _exporter.Exporter,
     pipeline_mgr: PipelineManager | None,
-    crawler,
-    file_obj_or_storage,
+    crawler: object,
     *,
+    storage: Storage | None,
+    file_path: Path | None,
     storage_relpath: str | None = None,
 ) -> None:
-    """
-    Wire export handlers to the provided `dispatcher`.
-
-    Accepts only:
-      - `Storage` instance (async write) with required `storage_relpath`.
-      - path string or `Path` -> written with `aiofiles` (fully async).
-      - Special path values `-` or `stdout` are written to sys.stdout.
-    Passing an open file-like object is not supported.
-    """
-
+    """Wire export handlers to the provided `dispatcher`."""
     crawler._cli_signal_handlers = getattr(crawler, "_cli_signal_handlers", [])
 
-    is_storage = isinstance(file_obj_or_storage, Storage)
-    is_path = isinstance(file_obj_or_storage, (str, Path))
+    is_storage = storage is not None
+    is_path = file_path is not None
 
     if not (is_storage or is_path):
         raise TypeError(
-            "register_export_handlers requires a Storage instance or a path string/Path"
+            "register_export_handlers requires either a Storage instance or a Path file_path"
         )
-
-    storage: Storage | None = file_obj_or_storage if is_storage else None
-    path_str: str | None = str(file_obj_or_storage) if is_path else None
+    if is_storage and is_path:
+        raise TypeError("Provide only one of storage or file_path, not both")
 
     if is_storage and not storage_relpath:
         raise ValueError("storage_relpath is required when passing a Storage instance")
 
-    # aiofiles handle opened lazily on first write (None for stdout sentinel)
+    path_str: str | None = str(file_path) if is_path else None
+
     aiofile_handle: object | None = None
 
     async def _ensure_aiofile() -> None:
@@ -108,7 +110,6 @@ def register_export_handlers(
             return
 
         if str(path_str).lower() in {"-", "stdout"}:
-            # sentinel: direct stdout writes handled via to_thread
             aiofile_handle = sys.stdout
             return
 
@@ -128,7 +129,6 @@ def register_export_handlers(
             return
 
         if str(path_str).lower() in {"-", "stdout"}:
-            # Write to sys.stdout synchronously offloaded to a thread
             try:
                 await asyncio.to_thread(_sync_write_bytes, sys.stdout, data)
             except Exception:
@@ -150,7 +150,6 @@ def register_export_handlers(
             return
         try:
             if aiofile_handle is sys.stdout:
-                # nothing to close for stdout
                 return
             await aiofile_handle.close()
         except Exception:
@@ -158,13 +157,18 @@ def register_export_handlers(
         finally:
             aiofile_handle = None
 
-    async def _on_item_scraped(sender, item, spider=None, **kwargs):
-        spider = spider or sender
+    async def _on_item_scraped(
+        sender: object, item: Item, spider: Spider | None = None, **kwargs: object
+    ) -> None:
+        # Prefer a local variable to avoid reassigning annotated param with raw sender.
+        local_spider = spider or sender
         try:
-            processed = item
+            processed: Item | None = item
             if pipeline_mgr is not None:
                 try:
-                    processed = await pipeline_mgr.process_item(item, spider)
+                    # pipeline_mgr.process_item expects a Spider; the dispatcher may pass sender.
+                    # Use a type-ignore here to avoid runtime imports / circular references.
+                    processed = await pipeline_mgr.process_item(item, local_spider)  # type: ignore[arg-type]
                 except Exception:
                     return
 
@@ -175,39 +179,48 @@ def register_export_handlers(
                 data = exporter.serialize_item(processed)
             except Exception:
                 logger.exception(
-                    "Exporter failed to serialize item for %s", getattr(spider, "name", None)
+                    "Exporter failed to serialize item for %s", getattr(local_spider, "name", None)
                 )
                 return
 
             if is_storage:
-                await _write_to_storage(storage, storage_relpath, data)  # type: ignore[arg-type]
+                assert storage is not None
+                assert storage_relpath is not None
+                await _write_to_storage(storage, storage_relpath, data)
             else:
-                # path mode: ensure bytes and write with aiofiles (or stdout path)
                 if data is None:
                     return
                 b = data.encode("utf-8") if isinstance(data, str) else bytes(data)
                 await _aiofile_write(b)
         except Exception:
-            logger.exception("Failed to export item for %s", getattr(spider, "name", None))
+            logger.exception("Failed to export item for %s", getattr(local_spider, "name", None))
 
-    async def _on_spider_closed(sender, spider=None, reason=None, **kwargs):
-        spider = spider or sender
+    async def _on_spider_closed(
+        sender: object, spider: Spider | None = None, reason: str | None = None, **kwargs: object
+    ) -> None:
+        local_spider = spider or sender
         try:
             try:
                 out = exporter.close()
             except Exception:
-                logger.exception("Error closing exporter for %s", getattr(spider, "name", None))
+                logger.exception(
+                    "Error closing exporter for %s", getattr(local_spider, "name", None)
+                )
                 out = None
 
             if is_storage:
-                await _write_to_storage(storage, storage_relpath, out)  # type: ignore[arg-type]
+                assert storage is not None
+                assert storage_relpath is not None
+                await _write_to_storage(storage, storage_relpath, out)
             else:
                 if out is not None:
                     b = out.encode("utf-8") if isinstance(out, str) else bytes(out)
                     await _aiofile_write(b)
                 await _aiofile_close()
         except Exception:
-            logger.exception("Failed to finalize export for %s", getattr(spider, "name", None))
+            logger.exception(
+                "Failed to finalize export for %s", getattr(local_spider, "name", None)
+            )
 
     dispatcher.connect("item_scraped", _on_item_scraped, weak=False)
     dispatcher.connect("spider_closed", _on_spider_closed, weak=False)
