@@ -1,7 +1,7 @@
 
 ## Walk-through of a simple spider
 
-In order to show you how qCrawl works I’ll walk you through an example of a simple Spider using the simplest way to run a spider.
+To show you how qCrawl works, I’ll walk you through an example of a simple Spider using the simplest way to run a spider.
 
 ```py title="quotes_spider.py"
 from qcrawl.core.spider import Spider
@@ -62,7 +62,7 @@ Example item (JSON):
 ## How does it work?
 When you run `qcrawl quotes_spider:QuotesSpider` qCrawl does the following:
 
-1. qCrawl locates the `QuotesSpider` class, instantiate it, and passed to the crawling engine.
+1. qCrawl locates the `QuotesSpider` class, instantiates it, and passes it to the crawling engine.
 2. The crawler schedules HTTP requests for the URLs in the spider's `start_urls` attribute.
 3. Upon receiving a successful response (HTTP 200), it is routed to the default callback method: `parse()`.
 4. Inside the `parse()` method:
@@ -104,10 +104,7 @@ flowchart LR
   E --> F["Storage (save data)"]
   E --> G["Stdout (print data)"]
 
-  D["CLI options"]:::CLI
-
-  %% Styles
-  classDef CLI fill:#333,color:#fff,stroke:#777,stroke-width:2px
+  D["CLI options"]
 ```
 
 !!! note
