@@ -103,12 +103,13 @@ class DepthMiddleware(SpiderMiddleware):
 
                 self._depth_stats[next_depth] = self._depth_stats.get(next_depth, 0) + 1
 
-                logger.debug(
-                    "Enqueued request at depth %d: %s (priority: %d)",
-                    next_depth,
-                    new_req.url,
-                    getattr(new_req, "priority", 0),
-                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Enqueued request at depth %d: %s (priority: %d)",
+                        next_depth,
+                        new_req.url,
+                        getattr(new_req, "priority", 0),
+                    )
                 yield new_req
                 continue
 
@@ -129,12 +130,13 @@ class DepthMiddleware(SpiderMiddleware):
                 new_req = _Req(url=normalized_url, priority=priority, meta={"depth": next_depth})
                 self._depth_stats[next_depth] = self._depth_stats.get(next_depth, 0) + 1
 
-                logger.debug(
-                    "Enqueued request (from str) at depth %d: %s (priority: %d)",
-                    next_depth,
-                    item,
-                    priority,
-                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Enqueued request (from str) at depth %d: %s (priority: %d)",
+                        next_depth,
+                        item,
+                        priority,
+                    )
                 yield new_req
                 continue
 
@@ -143,17 +145,20 @@ class DepthMiddleware(SpiderMiddleware):
 
     async def open_spider(self, spider: "Spider") -> None:
         """Log configured depth when spider opens."""
-        max_depth = self._get_max_depth(spider)
-        if max_depth > 0:
-            logger.info("DepthMiddleware: max_depth=%d", max_depth)
-        else:
-            logger.info("DepthMiddleware: unlimited depth")
 
-    async def close_spider(self, spider: "Spider") -> None:
-        """Log accumulated depth statistics when spider closes."""
+        if logger.isEnabledFor(logging.DEBUG):
+            max_depth = self._get_max_depth(spider)
+
+            if max_depth > 0:
+                logger.info("DepthMiddleware: max_depth=%d", max_depth)
+            else:
+                logger.info("DepthMiddleware: unlimited depth")
+
+    async def close_spider(self, spider) -> None:
+        """Emit depth statistics."""
         if not self._depth_stats:
             return
 
-        logger.info("Depth statistics:")
-        for depth in sorted(self._depth_stats.keys()):
-            logger.info("Depth %d: %d requests", depth, self._depth_stats[depth])
+        max_depth_reached = max(self._depth_stats.keys()) if self._depth_stats else 0
+        spider.crawler.stats.set_counter("depth/max", max_depth_reached)
+        spider.crawler.stats.set_meta("depth/distribution", str(dict(self._depth_stats)))
