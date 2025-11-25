@@ -12,7 +12,8 @@ Example:
         rv = self.response_view(response)
 
         # Extract data using CSS selectors
-        title = rv.css(".title")[0] if rv.css(".title") else None
+        title_nodes = rv.doc.cssselect(".title")
+        title = title_nodes[0].text_content().strip() if title_nodes else None
         yield {"title": title, "url": response.url}
 ```
 
@@ -66,7 +67,8 @@ Example (inside a spider `parse` method)
         rv = self.response_view(response)
 
         # Yield a plain dict (engine wraps to Item)
-        yield {"title": rv.css(".title")[0] if rv.css(".title") else None}
+        title_nodes = rv.doc.cssselect(".title")
+        yield {"title": title_nodes[0].text_content().strip() if title_nodes else None}
 
         # Yield an Item explicitly
         from qcrawl.core.item import Item
