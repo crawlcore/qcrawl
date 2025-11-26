@@ -129,6 +129,13 @@ max_orphan_retries = 10
 redis_kwargs = {} # driver-specific options passed to redis client
 ```
 
+!!! info "Redis version compatibility"
+
+    **Redis server 7.4+ recommended** for full TTL support (per-item expiration)
+
+    - **With Redis 7.4+**: All features supported, including `item_ttl` and `dedupe_ttl` per-item expiration
+    - **With Redis 6.x**: Basic queue operations work, but TTL features (`item_ttl`, `dedupe_ttl`) will fail with command errors (`HEXPIRE` not available)
+
 ### Spider settings
 | Setting                    | Type       | Default        | Env variable                     | Validation          |
 |----------------------------|------------|----------------|----------------------------------|---------------------|
