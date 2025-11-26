@@ -2,80 +2,103 @@
 
 Middleware is a lightweight, low-level system for globally altering:
 
-* request/response processing (**downloader middleware**)
-* wrapping/filtering streams in/out of the spider (**spider middleware**)
+* **Downloader middleware**: request, response processing
+* **Spider middleware**: wrapping, filtering streams in / out of the spider
+<br>
 
+## Middleware processing order
+
+Middleware uses so-called *forward order for request, reverse order for response* pattern.
+
+- Requests flow downward through middleware (from spider → downloader)
+- Responses flow upward through middleware (from downloader → spider)
+
+```mermaid
+graph TD
+    Spider[Spider]
+    SpiderMW[Spider middleware<br/>100, 200, 300]
+    Engine[Engine]
+    DownloaderMW[Downloader middleware<br/>100, 200, 300]
+    Downloader[Downloader]
+    Internet[Internet]
+
+    Spider -->|"Request ↓<br/>(forward: 100→300)"| SpiderMW
+    SpiderMW -->|"Response ↑<br/>(reverse: 300→100)"| Spider
+
+    SpiderMW -->|"Request ↓"| Engine
+    Engine -->|"Response ↑"| SpiderMW
+
+    Engine -->|"Request ↓<br/>(forward: 100→300)"| DownloaderMW
+    DownloaderMW -->|"Response ↑<br/>(reverse: 300→100)"| Engine
+
+    DownloaderMW -->|"Request ↓"| Downloader
+    Downloader -->|"Response ↑"| DownloaderMW
+
+    Downloader -->|"HTTP Request ↓"| Internet
+    Internet -->|"HTTP Response ↑"| Downloader
+```
 
 ## Middleware activation
 
-To activate a middleware component, register middleware instances before the crawl using *Declarative* or
-*Programmatic* methods.
+To activate a middleware component, register middleware before the crawl.
 
-Middleware has the following precedence order for applying settings:
+## Default settings
 
-```mermaid
-flowchart LR
-  A["Declarative (settings)"] --> B[Programmatic]
+```toml
+[DOWNLOADER_MIDDLEWARES]
+# Lower number = executed first
+"qcrawl.middleware.downloader.RobotsTxtMiddleware"       = 200
+"qcrawl.middleware.downloader.HttpAuthMiddleware"        = 300
+"qcrawl.middleware.downloader.RetryMiddleware"           = 400
+"qcrawl.middleware.downloader.HttpCompressionMiddleware" = 500
+"qcrawl.middleware.downloader.RedirectMiddleware"        = 600
+"qcrawl.middleware.downloader.DownloadDelayMiddleware"   = 700
+"qcrawl.middleware.downloader.ConcurrencyMiddleware"     = 800
+"qcrawl.middleware.downloader.CookiesMiddleware"         = 900
+
+[SPIDER_MIDDLEWARES]
+# Lower number = executed first
+"qcrawl.middleware.spider.OffsiteMiddleware" = 100
+"qcrawl.middleware.spider.DepthMiddleware"   = 900
 ```
 
-### Declarative (settings)
-Provide `DOWNLOADER_MIDDLEWARES` and/or `SPIDER_MIDDLEWARES` mappings in code-based settings or spider `custom_settings`.
+### Via settings file (TOML)
+```toml title="settings.toml"
+[DOWNLOADER_MIDDLEWARES]
+"qcrawl.middleware.downloader.RetryMiddleware" = 400
 
-```py
-from qcrawl.middleware.downloader import RetryMiddleware
-from qcrawl.middleware.spider import DepthMiddleware
-
-# Global settings (code)
-DOWNLOADER_MIDDLEWARES = {
-    RetryMiddleware: 400,  # higher number = earlier execution
-}
-
-SPIDER_MIDDLEWARES = {
-    DepthMiddleware: 100,
-}
+[SPIDER_MIDDLEWARES]
+"qcrawl.middleware.spider.DepthMiddleware" = 900
 ```
 
-### Programmatic (runtime)
+See [CLI usage #configuration-file](../concepts/cli.md#configuration-file) for loading settings from a TOML file.
 
-Register middleware before the crawl begins. `Crawler.add_middleware()` accepts:
-
-- an instantiated middleware instance,
-- a middleware class (will be instantiated with no args),
-- a factory callable that accepts `spider` / `runtime_settings` and returns an instance or `None`.
-
-
-``` py
-from qcrawl.core.crawler import Crawler
-from qcrawl.middleware.downloader import RetryMiddleware
-
-spider = QuotesSpider()
-crawler = Crawler(spider, runtime_settings)
-
-# instance
-crawler.add_middleware(RetryMiddleware(max_retries=5))
-
-# class (will be instantiated with no args)
-crawler.add_middleware(RetryMiddleware)
-
-# factory callable
-def factory(settings):
-    return RetryMiddleware(max_retries=settings.MAX_RETRIES)
-crawler.add_middleware(factory)
+### Via spider custom_settings
+```python
+class MySpider(Spider):
+    custom_settings = {
+        "DOWNLOADER_MIDDLEWARES": {
+            "qcrawl.middleware.downloader.RetryMiddleware": 400,
+        },
+        "SPIDER_MIDDLEWARES": {
+            "qcrawl.middleware.spider.DepthMiddleware": 900,
+        },
+    }
 ```
-
 
 ## Available downloader middleware
 
-| Name                      | Purpose                                                                                                        | Configuration parameters                                                                                                                                                                                                                                                                                                                                                                                                              |
-|---------------------------|----------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `ConcurrencyMiddleware`   | Limit concurrent requests per-domain and globally, manage request delays per-domain.                           | `concurrency_per_domain: int` — max concurrent requests per domain (default `8`)<br>`concurrency: int` — max global concurrent requests (default `32`)<br>`delay_per_domain: float` — delay between requests to same domain in seconds (default `0.0`)                                                                                                                                                                                |
-| `CookiesMiddleware`       | Manage cookies per-spider and per-domain: send `Cookie` headers and extract `Set-Cookie`.                      | --                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `DownloadDelayMiddleware` | Enforce a fixed delay between requests to the same domain.                                                     | `delay_per_domain: float` — delay between requests to same domain in seconds (default `0.0`)                                                                                                                                                                                                                                                                                                                                          |
-| `HttpAuthMiddleware`      | Handle Basic and Digest HTTP authentication (proactive Basic, reactive Digest with 401).                       | `credentials: dict[str, tuple[str, str]]` — per-domain credentials (optional)<br>`auth_type: 'basic', 'digest'` — default `basic`<br>`digest_qop_auth_int: bool` — enable qop=`auth-int` support (default `False`).                                                                                                                                                                                                                   |
-| `ProxyMiddleware`         | Route requests via HTTP/SOCKS proxies, with optional per-domain and per-request overrides.                     | `proxies: dict[str, str]` — per-domain proxy URLs (optional)<br>`default_proxy: str` — default proxy URL (optional)<br>Per-request: `request.meta['proxy']` to override proxy URL or disable with `None`.                                                                                                                                                                                                                             |
-| `RedirectMiddleware`      | Follow HTTP 3xx redirects, build new `Request`s and enforce redirect hop limits.                               | `max_redirects: int` — maximum redirect hops (default `10`)                                                                                                                                                                                                                                                                                                                                                                           |
-| `RetryMiddleware`         | Retry transient network failures and specified HTTP status codes with exponential backoff.                     | `max_retries: int` — maximum attempts (default `3`)<br>`retry_http_codes: [int]` — HTTP status codes to retry (default `{429,500,502,503,504}`)<br>`priority_adjust: int` — priority delta for retries (default `-1`)<br>`backoff_base: float` — base seconds for exponential backoff (default `1.0`)<br>`backoff_max: float` — cap for backoff (default `60.0`)<br>`backoff_jitter: float` — jitter factor `0.0-1.0` (default `0.3`) |
-| `RobotsTxtMiddleware`     | Fetch and parse `robots.txt`, enforce `allow/deny` and apply crawl-delay as `request.meta['retry_delay']`.     | `user_agent: str` (default `*`)<br>`obey_robots_txt: bool` (default `True`)<br>`cache_ttl: float` (seconds, default `3600.0`)                                                                                                                                                                                                                                                                                                         |
+| Name                         | Purpose                                                                                                    | Configuration parameters                                                                                                                                                                                                                                                                                                                                                                                                              |
+|------------------------------|------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `ConcurrencyMiddleware`      | Limit concurrent requests per-domain using semaphores.                                                     | `concurrency_per_domain: int` — max concurrent requests per domain (default `2`)                                                                                                                                                                                                                                                                                                                                                      |
+| `CookiesMiddleware`          | Manage cookies per-spider and per-domain: send `Cookie` headers and extract `Set-Cookie`.                  | --                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `DownloadDelayMiddleware`    | Enforce a minimum delay between requests to the same domain.                                               | `delay_per_domain: float` — delay between requests to same domain in seconds (default `0.25`)                                                                                                                                                                                                                                                                                                                                         |
+| `HttpAuthMiddleware`         | Handle Basic and Digest HTTP authentication (proactive Basic, reactive Digest with 401).                   | `credentials: dict[str, tuple[str, str]]` — per-domain credentials (optional)<br>`auth_type: 'basic', 'digest'` — default `basic`<br>`digest_qop_auth_int: bool` — enable qop=`auth-int` support (default `False`).                                                                                                                                                                                                                   |
+| `HttpCompressionMiddleware`  | Decompress responses with Content-Encoding: gzip, deflate, zstd.                                           | `enable_zstd: bool` — enable zstd decompression support (default `True`)                                                                                                                                                                                                                                                                                                                                                              |
+| `HttpProxyMiddleware`        | Route requests via HTTP/HTTPS proxies with IPv6 support and NO_PROXY handling.                             | `http_proxy: str \| None` — HTTP proxy URL (optional)<br>`https_proxy: str \| None` — HTTPS proxy URL (optional)<br>`no_proxy: list[str] \| None` — domains/IPs to exclude from proxying (optional)<br>Per-spider: `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` attributes<br>Per-request: `request.meta['proxy']` to override                                                                                                             |
+| `RedirectMiddleware`         | Follow HTTP 3xx redirects, build new `Request`s and enforce redirect hop limits.                           | `max_redirects: int` — maximum redirect hops (default `10`)                                                                                                                                                                                                                                                                                                                                                                           |
+| `RetryMiddleware`            | Retry transient network failures and specified HTTP status codes with exponential backoff.                 | `max_retries: int` — maximum attempts (default `3`)<br>`retry_http_codes: [int]` — HTTP status codes to retry (default `{429,500,502,503,504}`)<br>`priority_adjust: int` — priority delta for retries (default `-1`)<br>`backoff_base: float` — base seconds for exponential backoff (default `1.0`)<br>`backoff_max: float` — cap for backoff (default `60.0`)<br>`backoff_jitter: float` — jitter factor `0.0-1.0` (default `0.3`) |
+| `RobotsTxtMiddleware`        | Fetch and parse `robots.txt`, enforce `allow/deny` and apply crawl-delay as `request.meta['retry_delay']`. | `user_agent: str` (default `*`)<br>`obey_robots_txt: bool` (default `True`)<br>`cache_ttl: float` (seconds, default `3600.0`)                                                                                                                                                                                                                                                                                                         |
 
 
 ## Available spider middlewares
