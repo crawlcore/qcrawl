@@ -236,7 +236,6 @@ class RedisQueue(RequestQueue):
         self.client = Redis.from_url(
             url,
             decode_responses=False,
-            ssl=ssl,
             retry_on_timeout=True,
             health_check_interval=30,
             **redis_kwargs,
@@ -282,58 +281,64 @@ class RedisQueue(RequestQueue):
         """
         if self._dedup_sha is None:
             sha = await self.client.script_load(_DEDUP_LUA)
-            if not isinstance(sha, (bytes, bytearray)):
-                raise RuntimeError(
-                    "Redis client returned non-bytes SHA from script_load; expected bytes. "
-                    "Configure the client with decode_responses=False."
-                )
-            self._dedup_sha = bytes(sha)
+            # redis-py 7.x returns str from script_load regardless of decode_responses
+            if isinstance(sha, str):
+                self._dedup_sha = sha.encode("ascii")
+            elif isinstance(sha, bytes):
+                self._dedup_sha = sha
+            else:
+                raise RuntimeError(f"Unexpected SHA type from script_load: {type(sha)}")
 
         if self._update_sha is None:
             sha = await self.client.script_load(_UPDATE_PRIORITY_LUA)
-            if not isinstance(sha, (bytes, bytearray)):
-                raise RuntimeError(
-                    "Redis client returned non-bytes SHA from script_load; expected bytes. "
-                    "Configure the client with decode_responses=False."
-                )
-            self._update_sha = bytes(sha)
+            if isinstance(sha, str):
+                self._update_sha = sha.encode("ascii")
+            elif isinstance(sha, bytes):
+                self._update_sha = sha
+            else:
+                raise RuntimeError(f"Unexpected SHA type from script_load: {type(sha)}")
 
         if self._dedup_limit_sha is None:
             sha = await self.client.script_load(_DEDUP_LUA_LIMIT)
-            if not isinstance(sha, (bytes, bytearray)):
-                raise RuntimeError(
-                    "Redis client returned non-bytes SHA from script_load; expected bytes. "
-                    "Configure the client with decode_responses=False."
-                )
-            self._dedup_limit_sha = bytes(sha)
+            if isinstance(sha, str):
+                self._dedup_limit_sha = sha.encode("ascii")
+            elif isinstance(sha, bytes):
+                self._dedup_limit_sha = sha
+            else:
+                raise RuntimeError(f"Unexpected SHA type from script_load: {type(sha)}")
 
         if self._update_limit_sha is None:
             sha = await self.client.script_load(_UPDATE_PRIORITY_LUA_LIMIT)
-            if not isinstance(sha, (bytes, bytearray)):
-                raise RuntimeError(
-                    "Redis client returned non-bytes SHA from script_load; expected bytes. "
-                    "Configure the client with decode_responses=False."
-                )
-            self._update_limit_sha = bytes(sha)
+            if isinstance(sha, str):
+                self._update_limit_sha = sha.encode("ascii")
+            elif isinstance(sha, bytes):
+                self._update_limit_sha = sha
+            else:
+                raise RuntimeError(f"Unexpected SHA type from script_load: {type(sha)}")
 
         if self._non_dedupe_limit_sha is None:
             sha = await self.client.script_load(_NON_DEDUPE_LUA_LIMIT)
-            if not isinstance(sha, (bytes, bytearray)):
-                raise RuntimeError(
-                    "Redis client returned non-bytes SHA from script_load; expected bytes. "
-                    "Configure the client with decode_responses=False."
-                )
-            self._non_dedupe_limit_sha = bytes(sha)
+            if isinstance(sha, str):
+                self._non_dedupe_limit_sha = sha.encode("ascii")
+            elif isinstance(sha, bytes):
+                self._non_dedupe_limit_sha = sha
+            else:
+                raise RuntimeError(f"Unexpected SHA type from script_load: {type(sha)}")
 
-    async def _evalsha_with_reload(self, sha: bytes | None, num_keys: int, *args: object) -> int:
+    async def _evalsha_with_reload(self, sha_attr: str, num_keys: int, *args: object) -> int:
         """Call `EVALSHA` and reload scripts on `NOSCRIPT` errors, then retry once.
 
-        Accepts SHA as `bytes` (or `None`), retries script load on NOSCRIPT.
+        Args:
+            sha_attr: Attribute name containing the SHA (e.g., '_dedup_sha')
+            num_keys: Number of keys in the Lua script
+            args: Script arguments
+
+        The SHA is fetched from self.{sha_attr} dynamically to support lazy loading.
         """
+        await self._ensure_scripts_loaded()
+        sha = getattr(self, sha_attr)
         if sha is None:
-            await self._ensure_scripts_loaded()
-            # if caller passed None, try to continue but require a sha
-            raise RuntimeError("Missing script SHA for EVALSHA call")
+            raise RuntimeError(f"Script SHA not loaded: {sha_attr}")
 
         try:
             res = await self.client.evalsha(sha, num_keys, *args)
@@ -385,9 +390,9 @@ class RedisQueue(RequestQueue):
             item_id = self.fingerprinter.fingerprint_bytes(
                 request, digest_size=self.fingerprint_size
             )
-            # choose sha (limit-aware if maxsize configured)
+            # choose sha attribute name (limit-aware if maxsize configured)
             if self._maxsize:
-                sha = self._update_limit_sha if self.update_priority else self._dedup_limit_sha
+                sha_attr = "_update_limit_sha" if self.update_priority else "_dedup_limit_sha"
                 # ARGV positions: id, payload, score, ttl, max
                 args_list: list[object] = [
                     self.fp_set_key,
@@ -402,7 +407,7 @@ class RedisQueue(RequestQueue):
                 # ensure num_keys is 3 (KEYS: fp_set, hash, zset)
                 num_keys = 3
             else:
-                sha = self._update_sha if self.update_priority else self._dedup_sha
+                sha_attr = "_update_sha" if self.update_priority else "_dedup_sha"
                 args_list = [
                     self.fp_set_key,
                     self.hash_key,
@@ -416,7 +421,7 @@ class RedisQueue(RequestQueue):
                 num_keys = 3
 
             # Call script (may raise and will reload on NOSCRIPT)
-            res = await self._evalsha_with_reload(sha, num_keys, *args_list)
+            res = await self._evalsha_with_reload(sha_attr, num_keys, *args_list)
 
             # For limit variants script returns -1 on full, 0 duplicate, 1 added
             if res < 0:
@@ -429,7 +434,6 @@ class RedisQueue(RequestQueue):
             # non-dedupe path: use binary UUID (16 bytes)
             item_id = uuid.uuid4().bytes
             if self._maxsize:
-                sha = self._non_dedupe_limit_sha
                 # ARGV: id, payload, score, ttl, max
                 args_list = [
                     item_id,
@@ -438,7 +442,7 @@ class RedisQueue(RequestQueue):
                     str(self.item_ttl) if self.item_ttl else "",
                     max_arg,
                 ]
-                res = await self._evalsha_with_reload(sha, 3, *args_list)
+                res = await self._evalsha_with_reload("_non_dedupe_limit_sha", 3, *args_list)
                 if int(res) == 0:
                     raise asyncio.QueueFull
                 return None
@@ -530,7 +534,7 @@ class RedisQueue(RequestQueue):
 
     async def close(self) -> None:
         """Close the underlying Redis client connection."""
-        await self.client.close()
+        await self.client.aclose()
 
     def maxsize(self) -> int:
         """Return configured maximum capacity (0 = unlimited)."""

@@ -1,157 +1,184 @@
+"""Tests for qcrawl.core.queues.redis.RedisQueue
+
+These tests require a running Redis server.
+RedisQueue requires Redis 7.4+ for per-item TTL support (ZADD...EX, HEXPIRE).
+
+Start Redis locally:
+    docker run -d -p 6379:6379 redis:latest
+
+Tests are automatically skipped if Redis server is not running on localhost:6379.
+"""
+
 import asyncio
-from itertools import count
 
 import pytest
+import redis.asyncio as aioredis
 
-from qcrawl.core.queue import RequestQueue
-from qcrawl.core.queues import factory as queue_factory
+from qcrawl.core.queues.redis import RedisQueue
 from qcrawl.core.request import Request
 
 
-class FakeRedisQueue(RequestQueue):
-    """In-test fake that mimics the external Redis-backed queue API but stores
-    serialized bytes internally. This lets tests exercise serialization/
-    deserialization and queue semantics without a networked Redis server.
-    """
-
-    def __init__(self, maxsize: int = 0, **kwargs: object) -> None:
-        if maxsize < 0:
-            raise ValueError("maxsize must be >= 0")
-        if kwargs:
-            keys = ", ".join(str(k) for k in kwargs)
-            raise TypeError(f"Unexpected keyword argument(s) for FakeRedisQueue: {keys}")
-
-        self._pq: asyncio.PriorityQueue[tuple[int, int, bytes]] = asyncio.PriorityQueue(
-            maxsize=maxsize
-        )
-        self._counter = count()
-        self._closed = False
-
-    async def put(self, request: Request, priority: int = 0) -> None:
-        if self._closed:
-            return
-        payload = request.to_bytes()
-        if not isinstance(payload, bytes):
-            raise TypeError("Request.to_bytes() did not return bytes")
-        await self._pq.put((priority, next(self._counter), payload))
-
-    async def get(self) -> Request:
-        if self._closed and self._pq.empty():
-            raise asyncio.CancelledError
-        _, _, payload = await self._pq.get()
-        try:
-            if isinstance(payload, bytes):
-                try:
-                    req = Request.from_bytes(payload)
-                    return req
-                except Exception as exc:
-                    raise RuntimeError("Failed to decode in-memory request payload") from exc
-            else:
-                raise TypeError(f"Unexpected payload type in queue: {type(payload)!r}")
-        finally:
-            with __import__("contextlib").suppress(Exception):
-                self._pq.task_done()
-
-    async def size(self) -> int:
-        return int(self._pq.qsize())
-
-    def maxsize(self) -> int:
-        return self._pq.maxsize
-
-    async def clear(self) -> None:
-        while True:
-            try:
-                self._pq.get_nowait()
-                with __import__("contextlib").suppress(Exception):
-                    self._pq.task_done()
-            except asyncio.QueueEmpty:
-                break
-
-    async def close(self) -> None:
-        self._closed = True
-
-    def __repr__(self) -> str:
-        return f"<FakeRedisQueue size={self._pq.qsize()} maxsize={self._pq.maxsize} closed={self._closed}>"
+async def is_redis_running(url: str = "redis://localhost:6379/0") -> bool:
+    """Check if Redis server is running."""
+    try:
+        client = aioredis.from_url(url, decode_responses=False)
+        await client.ping()
+        await client.aclose()
+        return True
+    except Exception:
+        return False
 
 
 @pytest.fixture
-def fake_redis_backend() -> str:
-    """Returns the dotted path to FakeRedisQueue for use with create_queue."""
-    return "tests.core.queues.test_redis_queue.FakeRedisQueue"
+async def redis_queue():
+    """Fixture providing a clean RedisQueue for testing."""
+    # Check if Redis is running
+    if not await is_redis_running():
+        pytest.skip("Redis server not running on localhost:6379")
+
+    # Create queue with test namespace
+    queue = RedisQueue(
+        url="redis://localhost:6379/0",
+        namespace="qcrawl_test",
+        dedupe=False,  # Start with simple non-deduping queue
+    )
+
+    # Clear any existing test data
+    await queue.clear()
+
+    yield queue
+
+    # Cleanup
+    await queue.clear()
+    await queue.close()
 
 
 @pytest.mark.asyncio
-async def test_redis_backend_via_factory_and_basic_order(fake_redis_backend: str) -> None:
-    q = await queue_factory.create_queue(fake_redis_backend)
+async def test_redis_basic_put_get(redis_queue):
+    """RedisQueue basic put and get operations."""
+    req = Request(url="https://example.com/test")
 
-    # basic priority + FIFO tie-break behavior
-    r_low = Request(url="http://low.example")
-    r_p5 = Request(url="http://p5.example")
-    r_p1_a = Request(url="http://p1-a.example")
-    r_p1_b = Request(url="http://p1-b.example")
+    await redis_queue.put(req, priority=0)
+    retrieved = await redis_queue.get()
 
-    await q.put(r_low, priority=5)
-    await q.put(r_p1_a, priority=1)
-    await q.put(r_p1_b, priority=1)
-    await q.put(r_p5, priority=5)
-
-    got = await q.get()
-    assert got.url == r_p1_a.url
-
-    got = await q.get()
-    assert got.url == r_p1_b.url
-
-    got = await q.get()
-    assert got.url in {r_low.url, r_p5.url}
-
-    got = await q.get()
-    assert got.url in {r_low.url, r_p5.url}
+    assert retrieved.url == req.url
 
 
 @pytest.mark.asyncio
-async def test_redis_queue_clear_and_size(fake_redis_backend: str) -> None:
-    q = await queue_factory.create_queue(fake_redis_backend)
+async def test_redis_priority_ordering(redis_queue):
+    """RedisQueue returns items in priority order (higher priority first)."""
+    r_low = Request(url="https://example.com/low")
+    r_high = Request(url="https://example.com/high")
+    r_mid = Request(url="https://example.com/mid")
 
-    await q.put(Request(url="http://one"), priority=0)
-    await q.put(Request(url="http://two"), priority=0)
+    # Add in mixed order
+    await redis_queue.put(r_mid, priority=5)
+    await redis_queue.put(r_low, priority=1)
+    await redis_queue.put(r_high, priority=10)  # Highest priority = first out
 
-    assert await q.size() == 2
-
-    await q.clear()
-    assert await q.size() == 0
-
-
-@pytest.mark.asyncio
-async def test_redis_queue_close_and_cancel(fake_redis_backend: str) -> None:
-    q = await queue_factory.create_queue(fake_redis_backend)
-
-    # close should mark queue closed
-    await q.close()
-
-    # put after close is a no-op
-    await q.put(Request(url="http://ignored"), priority=0)
-    assert await q.size() == 0
-
-    # get on closed+empty queue should raise asyncio.CancelledError
-    with pytest.raises(asyncio.CancelledError):
-        await q.get()
+    # Should get in priority order (high to low)
+    assert (await redis_queue.get()).url == "https://example.com/high"
+    assert (await redis_queue.get()).url == "https://example.com/mid"
+    assert (await redis_queue.get()).url == "https://example.com/low"
 
 
 @pytest.mark.asyncio
-async def test_redis_queue_raises_runtimeerror_on_decode_failure(fake_redis_backend: str) -> None:
-    q = await queue_factory.create_queue(fake_redis_backend)
+async def test_redis_size(redis_queue):
+    """RedisQueue tracks size correctly."""
+    assert await redis_queue.size() == 0
 
-    class BrokenRequest(Request):
-        def to_bytes(self) -> bytes:
-            return b"not-valid-serialized-request"
+    await redis_queue.put(Request(url="https://example.com/1"), priority=0)
+    await redis_queue.put(Request(url="https://example.com/2"), priority=0)
 
-        @classmethod
-        def from_bytes(cls, data: bytes) -> "BrokenRequest":
-            raise RuntimeError("Deserialization failed")
+    assert await redis_queue.size() == 2
 
-    bad_req = BrokenRequest(url="http://broken.example")
+    await redis_queue.get()
+    assert await redis_queue.size() == 1
 
-    await q.put(bad_req)
 
-    with pytest.raises(RuntimeError):
-        await q.get()
+@pytest.mark.asyncio
+async def test_redis_clear(redis_queue):
+    """RedisQueue clear removes all items."""
+    await redis_queue.put(Request(url="https://example.com/1"), priority=0)
+    await redis_queue.put(Request(url="https://example.com/2"), priority=0)
+
+    assert await redis_queue.size() == 2
+
+    await redis_queue.clear()
+    assert await redis_queue.size() == 0
+
+
+@pytest.mark.asyncio
+async def test_redis_with_deduplication():
+    """RedisQueue with dedupe enabled prevents duplicate requests."""
+    if not await is_redis_running():
+        pytest.skip("Redis server not running")
+
+    queue = RedisQueue(
+        url="redis://localhost:6379/0",
+        namespace="qcrawl_test_dedupe",
+        dedupe=True,  # Enable deduplication
+    )
+
+    try:
+        await queue.clear()
+
+        req = Request(url="https://example.com/same")
+
+        # First put should succeed
+        await queue.put(req, priority=0)
+        assert await queue.size() == 1
+
+        # Second put of same URL should be deduplicated
+        await queue.put(req, priority=0)
+        assert await queue.size() == 1  # Still only 1 item
+
+        # Get should return the single item
+        retrieved = await queue.get()
+        assert retrieved.url == req.url
+        assert await queue.size() == 0
+
+    finally:
+        await queue.clear()
+        await queue.close()
+
+
+@pytest.mark.asyncio
+async def test_redis_serialization_roundtrip(redis_queue):
+    """RedisQueue correctly serializes and deserializes complex requests."""
+    req = Request(
+        url="https://example.com/complex",
+        method="POST",
+        headers={"User-Agent": "test", "X-Custom": "value"},
+        meta={"depth": 2, "custom": "data"},
+        body=b"request body",
+        priority=5,
+    )
+
+    await redis_queue.put(req, priority=req.priority)
+    retrieved = await redis_queue.get()
+
+    assert retrieved.url == req.url
+    assert retrieved.method == req.method
+    assert retrieved.headers == req.headers
+    assert retrieved.meta == req.meta
+    assert retrieved.body == req.body
+
+
+@pytest.mark.asyncio
+async def test_redis_empty_get_timeout():
+    """RedisQueue.get() with timeout on empty queue."""
+    if not await is_redis_running():
+        pytest.skip("Redis server not running")
+
+    queue = RedisQueue(url="redis://localhost:6379/0", namespace="qcrawl_test_timeout")
+
+    try:
+        await queue.clear()
+
+        # Getting from empty queue should timeout/raise
+        with pytest.raises((asyncio.TimeoutError, asyncio.CancelledError)):
+            await asyncio.wait_for(queue.get(), timeout=0.5)
+
+    finally:
+        await queue.close()
