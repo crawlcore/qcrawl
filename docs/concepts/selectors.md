@@ -152,7 +152,7 @@ tree.cssselect('input[type="checkbox"]:checked')  # Note: :checked works
                 text = a.text_content().strip() if a is not None else ""
                 if not href:
                     continue
-                yield Item(data={"url": rv.follow(href), "title": text})
+                yield Item(data={"url": rv.urljoin(href), "title": text})
     ```
 
 ### Common Pitfalls & Gotchas
