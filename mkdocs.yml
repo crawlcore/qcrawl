@@ -30,7 +30,7 @@ nav:
   - Extending qCrawl:
     - Architecture overview: extending/architecture_overview.md
 #    - Middleware: extending/middleware.md
-#    - Signals: extending/downloader_middleware.md
+    - Signals: extending/signals.md
 #    - Scheduler: extending/downloader_middleware.md
 #    - Item Exporters: extending/downloader_middleware.md
 
