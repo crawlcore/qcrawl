@@ -13,7 +13,7 @@ flowchart LR
 ```
 
 ## Best practices
-qCrawls defaults are not supposed to be changed for per-project needs. Instead, use the configuration layers
+qCrawl's defaults are not supposed to be changed for per-project needs. Instead, use the configuration layers
 as intended:
 
 
@@ -130,21 +130,23 @@ redis_kwargs = {} # driver-specific options passed to redis client
 ```
 
 ### Spider settings
-| Setting                  | Type       | Default        | Env variable                     | Validation          |
-|--------------------------|------------|----------------|----------------------------------|---------------------|
-| `concurrency`            | `int`      | `10`           | `QCRAWL_CONCURRENCY`             | must be 1-10000     |
-| `concurrency_per_domain` | `int`      | `2`            | `QCRAWL_CONCURRENCY_PER_DOMAIN`  | must be >= 1        |
-| `delay_per_domain`       | `float`    | `0.25`         | `QCRAWL_DELAY_PER_DOMAIN`        | must be >= 0        |
-| `max_depth`              | `int`      | `0`            | `QCRAWL_MAX_DEPTH`               |                     |
-| `timeout`                | `float`    | `30.0`         | `QCRAWL_TIMEOUT`                 | must be > 0         |
-| `max_retries`            | `int`      | `3`            | `QCRAWL_MAX_RETRIES`             | must be >= 0        |
-| `user_agent`             | `str`      | `'qCrawl/1.0'` | `QCRAWL_USER_AGENT`              |                     |
-| `ignore_query_params`    | `set[str]` | `None`         | `QCRAWL_IGNORE_QUERY_PARAMS`     | mutually exclusive  |
-| `keep_query_params`      | `set[str]` | `None`         | `QCRAWL_KEEP_QUERY_PARAMS`       | mutually exclusive  |
+| Setting                    | Type       | Default        | Env variable                     | Validation          |
+|----------------------------|------------|----------------|----------------------------------|---------------------|
+| `CONCURRENCY`              | `int`      | `10`           | `QCRAWL_CONCURRENCY`             | must be 1-10000     |
+| `CONCURRENCY_PER_DOMAIN`   | `int`      | `2`            | `QCRAWL_CONCURRENCY_PER_DOMAIN`  | must be >= 1        |
+| `DELAY_PER_DOMAIN`         | `float`    | `0.25`         | `QCRAWL_DELAY_PER_DOMAIN`        | must be >= 0        |
+| `MAX_DEPTH`                | `int`      | `0`            | `QCRAWL_MAX_DEPTH`               |                     |
+| `TIMEOUT`                  | `float`    | `30.0`         | `QCRAWL_TIMEOUT`                 | must be > 0         |
+| `MAX_RETRIES`              | `int`      | `3`            | `QCRAWL_MAX_RETRIES`             | must be >= 0        |
+| `USER_AGENT`               | `str`      | `'qCrawl/1.0'` | `QCRAWL_USER_AGENT`              |                     |
+| `IGNORE_QUERY_PARAMS`      | `set[str]` | `None`         | `QCRAWL_IGNORE_QUERY_PARAMS`     | mutually exclusive  |
+| `KEEP_QUERY_PARAMS`        | `set[str]` | `None`         | `QCRAWL_KEEP_QUERY_PARAMS`       | mutually exclusive  |
 
 
 ### Logging settings
-| Setting     | Type   | Default  | Env variable        | Validation                                         |
-|-------------|--------|----------|---------------------|----------------------------------------------------|
-| `log_level` | `str`  | `'INFO'` | `QCRAWL_LOG_LEVEL`  | `['DEBUG', 'INFO', 'WARNING, 'ERROR, 'CRITICAL']`  |
-| `log_file`  | `str`  | `None`   | `QCRAWL_LOG_FILE`   | `str`                                              |
+| Setting          | Type  | Default                                             | Env variable            | Validation                                          |
+|------------------|-------|-----------------------------------------------------|-------------------------|-----------------------------------------------------|
+| `LOG_LEVEL`      | `str` | `'INFO'`                                            | `QCRAWL_LOG_LEVEL`      | `['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']` |
+| `LOG_FILE`       | `str` | `None`                                              | `QCRAWL_LOG_FILE`       |                                                     |
+| `LOG_FORMAT`     | `str` | `'%(asctime)s %(levelname)s %(name)s: %(message)s'` | `QCRAWL_LOG_FORMAT`     |                                                     |
+| `LOG_DATEFORMAT` | `str` | `None`                                              | `QCRAWL_LOG_DATEFORMAT` |                                                     |
