@@ -76,3 +76,64 @@ def test_main_invokes_runner(monkeypatch, tmp_path):
     spider_cls, args_ns, spider_settings, runtime_settings = recorded[0]
     assert spider_cls is DummySpider
     assert args_ns.export == str(tmp_path / "out.ndjson")
+
+
+def test_load_spider_class_adds_cwd_to_syspath(tmp_path, monkeypatch):
+    """Test that load_spider_class automatically adds CWD to sys.path"""
+
+    # Create a spider module in a temp directory
+    spider_file = tmp_path / "test_spider.py"
+    spider_file.write_text(
+        """
+from qcrawl.core.spider import Spider
+
+class TestSpider(Spider):
+    name = "test"
+    start_urls = ["http://example.com"]
+
+    async def parse(self, response):
+        if False:
+            yield
+"""
+    )
+
+    # Change to the temp directory
+    monkeypatch.chdir(tmp_path)
+
+    # Save original sys.path
+    original_path = sys.path.copy()
+
+    try:
+        # Load spider class with module path
+        spider_cls = cli.load_spider_class("test_spider:TestSpider")
+
+        # Verify CWD was added to sys.path
+        assert str(tmp_path) in sys.path
+
+        # Verify we got the correct spider class
+        assert spider_cls.__name__ == "TestSpider"
+        assert spider_cls.name == "test"
+    finally:
+        # Restore sys.path
+        sys.path[:] = original_path
+
+
+def test_load_spider_class_with_dotted_module_path(monkeypatch):
+    """Test that dotted module paths work correctly with CWD added"""
+    # Save original sys.path
+    original_path = sys.path.copy()
+
+    try:
+        # Load our DummySpider using dotted path
+        spider_cls = cli.load_spider_class("tests.test_cli:DummySpider")
+
+        # Verify CWD was added
+        import os
+
+        assert os.getcwd() in sys.path
+
+        # Verify we got the correct spider class
+        assert spider_cls is DummySpider
+    finally:
+        # Restore sys.path
+        sys.path[:] = original_path

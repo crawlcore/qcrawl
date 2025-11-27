@@ -2,6 +2,8 @@ import argparse
 import asyncio
 import importlib
 import logging
+import os
+import sys
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -203,9 +205,17 @@ def load_spider_class(path: str) -> type[Spider]:
       - module.Class
       - module (module must export a Spider subclass named `Spider`)
 
+    Automatically adds CWD to sys.path to allow imports without PYTHONPATH manipulation.
+
     Raises:
       ImportError / TypeError on failure.
     """
+    # Add CWD to sys.path if not already present
+    cwd = os.getcwd()
+    if cwd not in sys.path:
+        sys.path.insert(0, cwd)
+
+    # Parse module and class name
     if ":" in path:
         mod_name, cls_name = path.split(":", 1)
     elif "." in path:
