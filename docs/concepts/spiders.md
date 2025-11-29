@@ -6,12 +6,15 @@ the crawl (i.e. follow links) and how to extract structured data from the pages 
 
 qCrawl spiders should subclass `qcrawl.core.spider.Spider`, override the async `parse()` method, and define the `name` and `start_urls` attributes.
 
-Required class attributes:
+Class attributes:
 
-- `name`: str — unique spider identifier.
-- `start_urls`: list[str] — initial URLs to crawl.
+- `name`: str — unique spider identifier (required).
+- `start_urls`: list[str] — initial URLs to crawl (required).
 
-`parse(response)` — async generator that yields:
+- `custom_settings`: dict — spider-specific settings that override global project settings.
+- `allowed_domains`: list[str] — restrict crawling to these domains.
+
+`parse(response)` — async generator that can yield:
 
 - [`Item`](items.md) (container for scraped fields and internal metadata) or plain dict (engine wraps into `Item`).
 - `Request` (data class representing an HTTP crawl request).
@@ -35,8 +38,13 @@ class QuotesSpider(Spider):
     start_urls = ["https://quotes.toscrape.com/"]
 
     async def parse(self, response: Page):
+
+        # ResponseView provides helper methods for parsing:
+        # CSS/XPath selectors, link extraction, url resolution
         rv = self.response_view(response)
 
+        # `response_view(response).doc` exposes a lazy-loaded `lxml` document tree
+        # for selectors guide see: https://www.qcrawl.org/concepts/selectors/
         for q in rv.doc.cssselect(".quote"):
             text_nodes = q.cssselect("span.text")
             author_nodes = q.cssselect("small.author")
@@ -56,7 +64,7 @@ class QuotesSpider(Spider):
         if next_link:
             href = next_link[0].get("href")
             if href:
-                yield self.follow(response, href)
+                yield rv.follow(response, href)
 ```
 
 ## Scraping lifecycle
