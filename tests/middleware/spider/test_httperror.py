@@ -372,3 +372,112 @@ async def test_custom_allowed_codes(spider):
     )
     result503 = await middleware.process_spider_input(response503, spider)
     assert isinstance(result503, IgnoreResponse)
+
+
+def test_should_filter_missing_status_code():
+    """_should_filter returns False when response has no status_code."""
+    middleware = HttpErrorMiddleware()
+
+    # Create a mock response without status_code attribute
+    class MockResponse:
+        pass
+
+    response = MockResponse()
+    should_filter = middleware._should_filter(response, {200, 404})  # type: ignore[arg-type]
+
+    assert should_filter is False
+
+
+@pytest.mark.asyncio
+async def test_open_spider_logs_no_allowed_codes(spider, caplog):
+    """open_spider logs when no codes are allowed (empty set)."""
+    import logging
+
+    caplog.set_level(logging.INFO)
+    middleware = HttpErrorMiddleware()
+    # Set empty list on spider (not middleware init, which would use default)
+    spider.HTTPERROR_ALLOWED_CODES = []
+
+    await middleware.open_spider(spider)
+
+    assert "no status codes allowed" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_open_spider_debug_logging(spider, caplog):
+    """open_spider logs status code ranges at debug level."""
+    import logging
+
+    caplog.set_level(logging.DEBUG)
+    middleware = HttpErrorMiddleware(allowed_codes=[200, 201, 202, 404, 500, 501, 502])
+
+    await middleware.open_spider(spider)
+
+    # Should log ranges in debug mode
+    assert "HttpErrorMiddleware: allowed_codes=" in caplog.text
+    # Should show ranges like "200-202" and individual codes
+    log_text = caplog.text
+    assert "200-202" in log_text or ("200" in log_text and "201" in log_text)
+
+
+@pytest.mark.asyncio
+async def test_process_spider_input_sends_signal(spider):
+    """process_spider_input sends request_dropped signal when filtering."""
+    middleware = HttpErrorMiddleware()
+
+    # Track signal emissions
+    signal_calls = []
+
+    class MockSignalDispatcher:
+        async def send_async(self, signal_name, **kwargs):
+            signal_calls.append((signal_name, kwargs))
+
+    spider.signals = MockSignalDispatcher()
+
+    request = Request(url="https://example.com/page")
+    response = Page(
+        url="https://example.com/page",
+        content=b"error",
+        status_code=500,
+        headers={},
+        request=request,
+    )
+
+    result = await middleware.process_spider_input(response, spider)
+
+    assert isinstance(result, IgnoreResponse)
+    assert len(signal_calls) == 1
+    assert signal_calls[0][0] == "request_dropped"
+    assert signal_calls[0][1]["request"] is request
+
+
+@pytest.mark.asyncio
+async def test_process_spider_input_handles_signal_error(spider, caplog):
+    """process_spider_input handles signal sending errors gracefully."""
+    import logging
+
+    caplog.set_level(logging.ERROR)
+    middleware = HttpErrorMiddleware()
+
+    # Mock dispatcher that raises exception
+    class BrokenSignalDispatcher:
+        async def send_async(self, signal_name, **kwargs):
+            raise RuntimeError("Signal dispatcher error")
+
+    spider.signals = BrokenSignalDispatcher()
+
+    request = Request(url="https://example.com/page")
+    response = Page(
+        url="https://example.com/page",
+        content=b"error",
+        status_code=404,
+        headers={},
+        request=request,
+    )
+
+    # Should still filter the response despite signal error
+    result = await middleware.process_spider_input(response, spider)
+
+    assert isinstance(result, IgnoreResponse)
+    # Should log the error
+    assert "Error sending request_dropped signal" in caplog.text

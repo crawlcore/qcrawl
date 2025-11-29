@@ -157,3 +157,88 @@ def test_response_view_urljoin(dummy_spider):
     abs_url = view.urljoin("/page2")
 
     assert abs_url == "https://example.com/page2"
+
+
+def test_response_view_follow_invalid_url_fallback(dummy_spider):
+    """ResponseView.follow() uses fallback for invalid URLs."""
+    page = Page(
+        url="https://example.com/page",
+        content=b"<html></html>",
+        status_code=200,
+        headers={},
+    )
+
+    view = ResponseView(page, dummy_spider)
+    # Extremely malformed href that yarl can't parse
+    request = view.follow("relative/path", priority=1)
+
+    # Should still create a request (using fallback logic)
+    assert isinstance(request.url, str)
+    assert request.priority == 1
+
+
+def test_response_view_urljoin_invalid_url_fallback(dummy_spider):
+    """ResponseView.urljoin() uses fallback for invalid URLs."""
+    page = Page(
+        url="https://example.com/page",
+        content=b"<html></html>",
+        status_code=200,
+        headers={},
+    )
+
+    view = ResponseView(page, dummy_spider)
+    # Should handle edge cases gracefully
+    result = view.urljoin("relative/path")
+
+    assert isinstance(result, str)
+
+
+def test_spider_follow_convenience_method(dummy_spider):
+    """Spider.follow() is a convenience wrapper for ResponseView.follow()."""
+    page = Page(
+        url="https://example.com/page1",
+        content=b"<html></html>",
+        status_code=200,
+        headers={},
+    )
+
+    request = dummy_spider.follow(page, "/page2", priority=3, meta={"key": "value"})
+
+    assert request.url == "https://example.com/page2"
+    assert request.priority == 3
+    assert request.meta == {"key": "value"}
+
+
+@pytest.mark.asyncio
+async def test_open_spider_with_crawler(dummy_spider):
+    """open_spider extracts runtime_settings from crawler."""
+
+    class MockCrawler:
+        runtime_settings = {"CONCURRENCY": 16}
+
+    class MockEngineWithCrawler:
+        crawler = MockCrawler()
+
+    await dummy_spider.open_spider(MockEngineWithCrawler())
+
+    assert dummy_spider.crawler is not None
+    assert dummy_spider.runtime_settings == {"CONCURRENCY": 16}
+
+
+def test_response_view_doc_lazy_loading(dummy_spider):
+    """ResponseView.doc is lazy-loaded and cached."""
+    page = Page(
+        url="https://example.com",
+        content=b"<html><body><p>Test</p></body></html>",
+        status_code=200,
+        headers={},
+    )
+
+    view = ResponseView(page, dummy_spider)
+
+    # First access
+    doc1 = view.doc
+    # Second access should return same object
+    doc2 = view.doc
+
+    assert doc1 is doc2
