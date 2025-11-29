@@ -24,7 +24,6 @@ It receives a `Page` object representing the HTTP response, and yields `Item` ob
 Simple example spider that uses css selectors and yields `Item`:
 ```python
 from datetime import datetime, timezone
-from lxml import html
 
 from qcrawl.core.spider import Spider, ResponseView
 from qcrawl.core.response import Page
