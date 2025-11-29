@@ -33,6 +33,7 @@ class DownloadDelayMiddleware(DownloaderMiddleware):
             raise ValueError("delay_per_domain must be >= 0")
         self._delay = d
         self._last: dict[str, float] = {}
+        self._locks: dict[str, asyncio.Lock] = {}
 
     def _domain_key(self, url: str) -> str:
         try:
@@ -40,6 +41,12 @@ class DownloadDelayMiddleware(DownloaderMiddleware):
             return d or "default"
         except Exception:
             return "default"
+
+    def _get_lock(self, domain_key: str) -> asyncio.Lock:
+        """Get or create a lock for the given domain."""
+        if domain_key not in self._locks:
+            self._locks[domain_key] = asyncio.Lock()
+        return self._locks[domain_key]
 
     async def process_request(self, request: "Request", spider: "Spider") -> MiddlewareResult:
         # Determine effective delay (global vs per-request retry_delay)
@@ -56,10 +63,14 @@ class DownloadDelayMiddleware(DownloaderMiddleware):
         effective = max(self._delay, request_delay or 0.0)
         if effective > 0:
             key = self._domain_key(request.url)
-            last = self._last.get(key, 0.0)
-            elapsed = time.monotonic() - last
-            if elapsed < effective:
-                await asyncio.sleep(effective - elapsed)
+            lock = self._get_lock(key)
+
+            # Use lock to serialize delay checking per domain (prevents race conditions)
+            async with lock:
+                last = self._last.get(key, 0.0)
+                elapsed = time.monotonic() - last
+                if elapsed < effective:
+                    await asyncio.sleep(effective - elapsed)
 
         # mark which domain we used so response/exception can update timestamp
         if getattr(request, "meta", None) is None:
@@ -98,4 +109,6 @@ class DownloadDelayMiddleware(DownloaderMiddleware):
         return MiddlewareResult.continue_()
 
     async def open_spider(self, spider: "Spider") -> None:
+        self._last.clear()
+        self._locks.clear()
         logger.info("delay_per_domain: %.3f seconds", self._delay)
