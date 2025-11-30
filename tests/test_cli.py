@@ -70,6 +70,35 @@ def test_main_invokes_runner(monkeypatch, tmp_path, dummy_spider, run_coro_sync)
     assert args_ns.export == str(tmp_path / "out.ndjson")
 
 
+def test_main_without_export_flag(monkeypatch, dummy_spider, run_coro_sync):
+    """main() runs successfully without --export flag (defaults to stdout in runner)."""
+    monkeypatch.setattr(sys, "argv", ["qcrawl", "dummy:DummySpider"])
+
+    # Avoid real logging/file system side-effects
+    monkeypatch.setattr(cli, "setup_logging", lambda *a, **k: None)
+    monkeypatch.setattr(cli, "ensure_output_dir", lambda *a, **k: None)
+    monkeypatch.setattr(cli, "load_spider_class", lambda path: type(dummy_spider))
+
+    # Capture arguments passed to run_async
+    recorded = []
+
+    async def fake_run_async(spider_cls, args, settings, runtime_settings):
+        recorded.append((spider_cls, args, settings, runtime_settings))
+
+    monkeypatch.setattr(cli, "run_async", fake_run_async)
+    monkeypatch.setattr(cli.asyncio, "run", run_coro_sync)
+
+    # Call main
+    cli.main()
+
+    # Verify run_async was called (spider runs even without --export)
+    assert len(recorded) == 1
+    spider_cls, args_ns, spider_settings, runtime_settings = recorded[0]
+    assert spider_cls is type(dummy_spider)
+    # No --export provided, args.export should be None (runner defaults to stdout)
+    assert args_ns.export is None
+
+
 # Spider Loading Tests
 
 

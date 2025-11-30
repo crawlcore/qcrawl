@@ -162,7 +162,11 @@ async def run(
                     # treat this as our export target (no separate export_path)
                     export_path = path
 
-        exporter = None
+            # If still no export_path after checking spider settings, default to stdout
+            if not export_path:
+                export_path = "-"
+
+        # Always create exporter (export_path is now guaranteed to be set)
         if export_path:
             # Build exporter with resolved values (fall back to defaults)
             exporter = build_exporter(

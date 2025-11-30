@@ -255,7 +255,9 @@ def parse_args() -> argparse.Namespace:
     )
 
     g_output = parser.add_argument_group("Output & Export")
-    g_output.add_argument("--export", help="Export destination (Local path or '-'/'stdout')")
+    g_output.add_argument(
+        "--export", help="Export destination (defaults to stdout; use local path or '-'/'stdout')"
+    )
     g_output.add_argument(
         "--export-format", default="ndjson", choices=["ndjson", "json", "csv", "xml"]
     )

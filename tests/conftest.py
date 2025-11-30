@@ -7,6 +7,14 @@ import pytest
 from qcrawl.core.spider import Spider
 
 
+def pytest_configure(config):
+    """Register custom markers."""
+    config.addinivalue_line(
+        "markers",
+        "integration: Integration tests (use Docker, test against real services, slower)",
+    )
+
+
 class DummySpider(Spider):
     """Shared test spider used across all test files."""
 
