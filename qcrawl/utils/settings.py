@@ -177,6 +177,8 @@ def load_env(prefix: str = "QCRAWL_") -> dict[str, object]:
     - Keys are returned uppercased with the prefix stripped.
     - JSON-like values (start with { or [) are parsed via orjson.
     - Otherwise uses `parse_literal` to coerce simple types.
+    - Double-underscore keys (e.g., QCRAWL_CAMOUFOX__MAX_CONTEXTS) are expanded
+      into nested dicts (e.g., {"CAMOUFOX": {"max_contexts": value}}).
     """
     out: dict[str, object] = {}
     for k, v in os.environ.items():
@@ -196,8 +198,50 @@ def load_env(prefix: str = "QCRAWL_") -> dict[str, object]:
                 val = parse_literal(raw)
         else:
             val = parse_literal(raw)
-        out[key.upper()] = val
+
+        # Handle double-underscore for nested keys
+        if "__" in key:
+            _set_nested_value(out, key, val)
+        else:
+            out[key.upper()] = val
     return out
+
+
+def _set_nested_value(target: dict[str, object], key: str, value: object) -> None:
+    """Set a nested value using double-underscore key notation.
+
+    Example: key="CAMOUFOX__MAX_CONTEXTS", value=20
+    Result: target["CAMOUFOX"]["max_contexts"] = 20
+
+    The first segment is uppercased (top-level setting name).
+    Subsequent segments are lowercased (nested keys).
+    """
+    parts = key.split("__")
+    if len(parts) < 2:
+        # No nesting, just set directly
+        target[key.upper()] = value
+        return
+
+    # First part is the top-level setting (UPPERCASE)
+    top_key = parts[0].upper()
+
+    # Navigate/create nested structure
+    current = target
+    for i, part in enumerate(parts[:-1]):
+        # Top-level key (UPPERCASE), nested keys (lowercase)
+        segment = top_key if i == 0 else part.lower()
+
+        if segment not in current:
+            current[segment] = {}
+        nested = current[segment]
+        if not isinstance(nested, dict):
+            # Can't nest into a non-dict value; skip this key
+            return
+        current = nested
+
+    # Set the final value (nested key in lowercase)
+    final_key = parts[-1].lower()
+    current[final_key] = value
 
 
 def map_keys_to_canonical(

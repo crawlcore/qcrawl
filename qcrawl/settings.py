@@ -122,6 +122,27 @@ class Settings:
     LOG_FORMAT: str = "%(asctime)s %(levelname)s %(name)s: %(message)s"
     LOG_DATEFORMAT: str | None = None
 
+    # Camoufox browser automation settings (Option A: nested configuration)
+    # Camoufox is a browser automation tool for anti-detection web scraping.
+    # All keys are optional and will use defaults if not provided.
+    # Env overrides: use QCRAWL_CAMOUFOX='{"key": "value"}' (JSON) or
+    # QCRAWL_CAMOUFOX__MAX_CONTEXTS=20 (double-underscore for nested keys)
+    CAMOUFOX: dict[str, object] = field(
+        default_factory=lambda: {
+            "enabled": False,
+            "max_contexts": 10,
+            "max_pages_per_context": 5,
+            "default_navigation_timeout": 30000.0,
+            "launch_options": {},
+            "abort_request": None,
+            "process_request_headers": "use_scrapy_headers",
+            "cdp_url": None,
+            "contexts": {
+                "default": {},
+            },
+        }
+    )
+
     def __post_init__(self) -> None:
         """Validation only - no loading, no mutations."""
         # Numeric ranges
@@ -203,6 +224,100 @@ class Settings:
                 if not isinstance(v, int):
                     raise TypeError(f"{name}[{k}] must be int")
 
+        # Validate CAMOUFOX settings
+        self._validate_camoufox()
+
+    def _validate_camoufox(self) -> None:
+        """Validate CAMOUFOX configuration structure and types."""
+        if self.CAMOUFOX is None:
+            return
+
+        if not isinstance(self.CAMOUFOX, dict):
+            raise TypeError("CAMOUFOX must be a dict")
+
+        valid_keys = {
+            "enabled",
+            "max_contexts",
+            "max_pages_per_context",
+            "default_navigation_timeout",
+            "launch_options",
+            "abort_request",
+            "process_request_headers",
+            "cdp_url",
+            "contexts",
+        }
+        invalid = set(self.CAMOUFOX.keys()) - valid_keys
+        if invalid:
+            raise ValueError(f"Invalid CAMOUFOX keys: {invalid}")
+
+        # Validate individual fields with type checking
+        cfg = self.CAMOUFOX
+
+        # enabled: bool
+        if "enabled" in cfg:
+            val = cfg["enabled"]
+            if not isinstance(val, bool):
+                raise TypeError("CAMOUFOX.enabled must be bool")
+
+        # max_contexts: int >= 1
+        if "max_contexts" in cfg:
+            val = ensure_int(cfg["max_contexts"], "CAMOUFOX.max_contexts")
+            if val is not None and val < 1:
+                raise ValueError("CAMOUFOX.max_contexts must be >= 1")
+
+        # max_pages_per_context: int >= 1
+        if "max_pages_per_context" in cfg:
+            val = ensure_int(cfg["max_pages_per_context"], "CAMOUFOX.max_pages_per_context")
+            if val is not None and val < 1:
+                raise ValueError("CAMOUFOX.max_pages_per_context must be >= 1")
+
+        # default_navigation_timeout: float > 0
+        if "default_navigation_timeout" in cfg:
+            val = cfg["default_navigation_timeout"]
+            if val is not None:
+                if not isinstance(val, (int, float)):
+                    raise TypeError("CAMOUFOX.default_navigation_timeout must be numeric")
+                if val <= 0:
+                    raise ValueError("CAMOUFOX.default_navigation_timeout must be > 0")
+
+        # launch_options: dict
+        if "launch_options" in cfg:
+            val = cfg["launch_options"]
+            if val is not None and not isinstance(val, dict):
+                raise TypeError("CAMOUFOX.launch_options must be dict or None")
+
+        # abort_request: None or callable path (str)
+        if "abort_request" in cfg:
+            val = cfg["abort_request"]
+            if val is not None and not isinstance(val, str):
+                raise TypeError("CAMOUFOX.abort_request must be str (dotted path) or None")
+
+        # process_request_headers: str (one of known values or custom callable path)
+        if "process_request_headers" in cfg:
+            val = cfg["process_request_headers"]
+            if val is not None and not isinstance(val, str):
+                raise TypeError("CAMOUFOX.process_request_headers must be str or None")
+
+        # cdp_url: str or None
+        if "cdp_url" in cfg:
+            val = cfg["cdp_url"]
+            if val is not None and not isinstance(val, str):
+                raise TypeError("CAMOUFOX.cdp_url must be str or None")
+
+        # contexts: dict of context_name -> context_config
+        if "contexts" in cfg:
+            contexts = cfg["contexts"]
+            if contexts is not None:
+                if not isinstance(contexts, dict):
+                    raise TypeError("CAMOUFOX.contexts must be dict or None")
+                for ctx_name, ctx_cfg in contexts.items():
+                    if not isinstance(ctx_name, str):
+                        raise TypeError(f"CAMOUFOX.contexts keys must be str, got {type(ctx_name)!r}")
+                    if ctx_cfg is not None and not isinstance(ctx_cfg, dict):
+                        raise TypeError(
+                            f"CAMOUFOX.contexts[{ctx_name!r}] must be dict or None"
+                        )
+
     @classmethod
     def load(cls, config_file: str | None = None, **overrides) -> Settings:
         """Load settings by applying layers onto a validated default Settings instance.
@@ -256,6 +371,7 @@ class Settings:
             "LOG_FILE": self.LOG_FILE,
             "LOG_FORMAT": self.LOG_FORMAT,
             "LOG_DATEFORMAT": self.LOG_DATEFORMAT,
+            "CAMOUFOX": self.CAMOUFOX,
         }
 
     def to_json(self) -> bytes:
