@@ -99,7 +99,7 @@ class CamoufoxDownloader:
         default_timeout: float = 30000.0,
         launch_options: dict[str, object] | None = None,
         abort_request: object | None = None,
-        process_request_headers: str | object = "use_scrapy_headers",
+        process_request_headers: str | object = "use_qcrawl_headers",
     ) -> None:
         """Initialize downloader with a Camoufox browser instance.
 
@@ -164,7 +164,7 @@ class CamoufoxDownloader:
         launch_options = cfg.get("launch_options", {})
         cdp_url = cfg.get("cdp_url")
         abort_request = cfg.get("abort_request")
-        process_request_headers = cfg.get("process_request_headers", "use_scrapy_headers")
+        process_request_headers = cfg.get("process_request_headers", "use_qcrawl_headers")
 
         # Type conversions
         if not isinstance(contexts, dict):
@@ -493,7 +493,7 @@ class CamoufoxDownloader:
         """Process request headers based on CAMOUFOX_PROCESS_REQUEST_HEADERS mode.
 
         Modes:
-          - "use_scrapy_headers": Merge qCrawl headers with provided headers
+          - "use_qcrawl_headers": Merge qCrawl headers with provided headers
           - "ignore": Return empty dict (let browser handle headers)
           - callable: Custom function(request, default_headers) -> dict
 
@@ -510,7 +510,7 @@ class CamoufoxDownloader:
         if mode == "ignore":
             return {}
 
-        if mode == "use_scrapy_headers":
+        if mode == "use_qcrawl_headers":
             # Get default headers from spider settings
             default_headers: dict[str, str] = {}
             if spider and hasattr(spider, "runtime_settings"):

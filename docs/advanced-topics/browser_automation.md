@@ -253,12 +253,12 @@ class InteractiveSpider(Spider):
 Control how qCrawl headers are sent to the browser:
 
 ```python
-"CAMOUFOX_PROCESS_REQUEST_HEADERS": "use_scrapy_headers"  # Default
+"CAMOUFOX_PROCESS_REQUEST_HEADERS": "use_qcrawl_headers"  # Default
 ```
 
 **Options:**
 
-- `"use_scrapy_headers"`: Merge qCrawl headers with browser requests (default)
+- `"use_qcrawl_headers"`: Merge qCrawl headers with browser requests (default)
 - `"ignore"`: Don't send qCrawl headers (use browser defaults only)
 - Custom callable: `lambda request, default_headers: {...}` for custom processing
 

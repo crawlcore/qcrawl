@@ -100,9 +100,7 @@ class Settings:
     )
 
     CAMOUFOX_ABORT_REQUEST: object | None = None  # Callable[[route.request], bool]
-    CAMOUFOX_PROCESS_REQUEST_HEADERS: str = (
-        "use_scrapy_headers"  # "use_scrapy_headers" | "ignore" | callable
-    )
+    CAMOUFOX_PROCESS_REQUEST_HEADERS: str = "use_qcrawl_headers"
     CAMOUFOX_CDP_URL: str | None = None  # Remote browser CDP endpoint
 
     DOWNLOADER_MIDDLEWARES: dict[str, int] = field(
@@ -274,11 +272,11 @@ class Settings:
             raise TypeError("CAMOUFOX_LAUNCH_OPTIONS must be a dict")
 
         if self.CAMOUFOX_PROCESS_REQUEST_HEADERS not in (
-            "use_scrapy_headers",
+            "use_qcrawl_headers",
             "ignore",
         ) and not callable(self.CAMOUFOX_PROCESS_REQUEST_HEADERS):
             raise ValueError(
-                "CAMOUFOX_PROCESS_REQUEST_HEADERS must be 'use_scrapy_headers', 'ignore', or callable"
+                "CAMOUFOX_PROCESS_REQUEST_HEADERS must be 'use_qcrawl_headers', 'ignore', or callable"
             )
 
         if self.CAMOUFOX_CDP_URL is not None and not isinstance(self.CAMOUFOX_CDP_URL, str):

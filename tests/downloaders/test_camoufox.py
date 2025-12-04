@@ -360,9 +360,9 @@ async def test_register_event_handlers_skips_non_callable(camoufox_downloader):
 # Header Processing Tests
 
 
-def test_process_headers_use_scrapy_headers(camoufox_downloader):
-    """_process_headers() merges headers when mode is use_scrapy_headers."""
-    camoufox_downloader._process_request_headers = "use_scrapy_headers"
+def test_process_headers_use_qcrawl_headers(camoufox_downloader):
+    """_process_headers() merges headers when mode is use_qcrawl_headers."""
+    camoufox_downloader._process_request_headers = "use_qcrawl_headers"
 
     mock_spider = Mock()
     mock_spider.runtime_settings = Mock()
