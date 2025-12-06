@@ -137,17 +137,17 @@ redis_kwargs = {} # driver-specific options passed to redis client
     - **With Redis 6.x**: Basic queue operations work, but TTL features (`item_ttl`, `dedupe_ttl`) will fail with command errors (`HEXPIRE` not available)
 
 ### Spider settings
-| Setting                    | Type       | Default        | Env variable                     | Validation          |
-|----------------------------|------------|----------------|----------------------------------|---------------------|
-| `CONCURRENCY`              | `int`      | `10`           | `QCRAWL_CONCURRENCY`             | must be 1-10000     |
-| `CONCURRENCY_PER_DOMAIN`   | `int`      | `2`            | `QCRAWL_CONCURRENCY_PER_DOMAIN`  | must be >= 1        |
-| `DELAY_PER_DOMAIN`         | `float`    | `0.25`         | `QCRAWL_DELAY_PER_DOMAIN`        | must be >= 0        |
-| `MAX_DEPTH`                | `int`      | `0`            | `QCRAWL_MAX_DEPTH`               |                     |
-| `TIMEOUT`                  | `float`    | `30.0`         | `QCRAWL_TIMEOUT`                 | must be > 0         |
-| `MAX_RETRIES`              | `int`      | `3`            | `QCRAWL_MAX_RETRIES`             | must be >= 0        |
-| `USER_AGENT`               | `str`      | `'qCrawl/1.0'` | `QCRAWL_USER_AGENT`              |                     |
-| `IGNORE_QUERY_PARAMS`      | `set[str]` | `None`         | `QCRAWL_IGNORE_QUERY_PARAMS`     | mutually exclusive  |
-| `KEEP_QUERY_PARAMS`        | `set[str]` | `None`         | `QCRAWL_KEEP_QUERY_PARAMS`       | mutually exclusive  |
+| Setting                    | Type       | Default        | Env variable                     | Validation                               |
+|----------------------------|------------|----------------|----------------------------------|------------------------------------------|
+| `CONCURRENCY`              | `int`      | `10`           | `QCRAWL_CONCURRENCY`             | must be 1-10000                          |
+| `CONCURRENCY_PER_DOMAIN`   | `int`      | `2`            | `QCRAWL_CONCURRENCY_PER_DOMAIN`  | must be >= 1, cannot exceed CONCURRENCY  |
+| `DELAY_PER_DOMAIN`         | `float`    | `0.25`         | `QCRAWL_DELAY_PER_DOMAIN`        | must be >= 0                             |
+| `MAX_DEPTH`                | `int`      | `0`            | `QCRAWL_MAX_DEPTH`               |                                          |
+| `TIMEOUT`                  | `float`    | `30.0`         | `QCRAWL_TIMEOUT`                 | must be > 0                              |
+| `MAX_RETRIES`              | `int`      | `3`            | `QCRAWL_MAX_RETRIES`             | must be >= 0                             |
+| `USER_AGENT`               | `str`      | `'qCrawl/1.0'` | `QCRAWL_USER_AGENT`              |                                          |
+| `IGNORE_QUERY_PARAMS`      | `set[str]` | `None`         | `QCRAWL_IGNORE_QUERY_PARAMS`     | mutually exclusive                       |
+| `KEEP_QUERY_PARAMS`        | `set[str]` | `None`         | `QCRAWL_KEEP_QUERY_PARAMS`       | mutually exclusive                       |
 
 
 ### Logging settings

@@ -6,7 +6,7 @@ qCrawl requires Python 3.11+, either the CPython implementation (default) or the
 
 I suggest to use CPython:
 
-* Compatibility: qCrawl stack relies on C-extensions (orjson, lxml, pickle wheels). They require nontrivial build workarounds.
+* Compatibility: qCrawl stack relies on C-extensions (orjson, lxml, msgspec). They require nontrivial build workarounds.
 * Workload profile: qCrawl is I/O-bound (networking via aiohttp, disk I/O, async queueing). PyPy’s JIT gives little advantage for async I/O where most time is spent waiting in C libraries or the OS.
 * Ecosystem: aiohttp and other async libraries are written and optimized for CPython. Wheels and CI support are more reliable on CPython.
 
@@ -27,7 +27,7 @@ Generally, I suggest to install qCrawl inside a [virtual environment](https://do
 Virtual environments allow you to avoid conflicts with already-installed Python system packages, and still install packages normally with `pip`.
 
 ### Linux/MacOS
-qCraw depends on popular packages and prebuilt wheels should be available for them on MacOS and Linux.
+qCrawl depends on popular packages and prebuilt wheels should be available for them on MacOS and Linux.
 Therefore once you have virtual environment set up and activated, try to install qCrawl using:
 
 ``` shell
@@ -84,3 +84,35 @@ Once you’ve installed Anaconda or Miniconda, install qCrawl with:
 ``` shell
 conda install -c conda-forge qcrawl
 ```
+
+## Optional Dependencies
+
+qCrawl provides optional features through extras that can be installed as needed.
+
+### Browser Automation
+
+For scraping JavaScript-heavy websites or Anti-Bot Evasion using [Camoufox](https://camoufox.com/) browser automation:
+
+```bash
+# Using pip
+pip install qcrawl[camoufox]
+
+# Using conda
+conda install -c conda-forge qcrawl camoufox
+```
+
+This enables the `CamoufoxDownloader`. See the [Browser Automation guide](../advanced-topics/browser_automation.md) for details.
+
+### Redis Queue Backend
+
+For distributed crawling with Redis-based scheduler:
+
+```bash
+# Using pip
+pip install qcrawl[redis]
+
+# Using conda
+conda install -c conda-forge qcrawl redis-py
+```
+
+Enables Redis as a queue backend for the scheduler, useful for distributed crawling setups.
