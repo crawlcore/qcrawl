@@ -127,11 +127,16 @@ class Settings:
         default_factory=lambda: {
             "memory": {
                 "class": "qcrawl.core.queues.memory.MemoryPriorityQueue",
-                "maxsize": 0,
+                "maxsize": 0,  # Max requests count (0 = unlimited)
+            },
+            "disk": {
+                "class": "qcrawl.core.queues.disk.DiskQueue",
+                "path": None,  # None = system temp dir (cross-platform)
+                "maxsize": 0,  # Max requests count (0 = unlimited)
             },
             "redis": {
                 "class": "qcrawl.core.queues.redis.RedisQueue",
-                "maxsize": 0,
+                "maxsize": 0,  # Max requests count (0 = unlimited)
                 "url": None,
                 "host": "localhost",
                 "port": "6379",

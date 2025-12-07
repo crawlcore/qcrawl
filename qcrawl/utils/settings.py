@@ -222,14 +222,17 @@ def map_keys_to_canonical(
 
 
 def shallow_merge_dicts(base: dict[str, object], overrides: dict[str, object]) -> dict[str, object]:
-    """Return a shallow-merged copy of base with overrides applied (dict values merged shallowly)."""
+    """Return a deep-merged copy of base with overrides applied (recursively merges nested dicts).
+
+    This function recursively merges nested dictionaries, allowing partial overrides
+    of nested settings like QUEUE_BACKENDS without losing the base configuration.
+    """
     merged = dict(base)
     for k, v in overrides.items():
         cur = merged.get(k)
         if isinstance(cur, dict) and isinstance(v, dict):
-            new = dict(cur)
-            new.update(v)
-            merged[k] = new
+            # Recursively merge nested dicts
+            merged[k] = shallow_merge_dicts(cur, v)
         else:
             merged[k] = v
     return merged

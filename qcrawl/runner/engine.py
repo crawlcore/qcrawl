@@ -88,16 +88,22 @@ async def run(
 
         crawler = Crawler(spider, runtime_settings=runtime_settings)
 
-        # create queue backend
-        backend = getattr(runtime_settings, "QUEUE_BACKEND", None) or "memory"
+        # Build final settings including spider custom_settings to respect configuration precedence
+        final_settings = crawler._build_final_settings()
+
+        # create queue backend using final settings (respects spider custom_settings)
+        backend = getattr(final_settings, "QUEUE_BACKEND", None) or "memory"
 
         try:
             backend_str = str(backend).strip()
 
-            # Lookup named backend config in runtime Settings (no dict compatibility layer)
-            backends_map = getattr(runtime_settings, "QUEUE_BACKENDS", None) or {}
+            # Lookup named backend config in final Settings
+            backends_map = getattr(final_settings, "QUEUE_BACKENDS", None) or {}
 
             cfg = backends_map.get(backend_str.lower().strip())
+
+            logger.info("Queue backend: %s, config: %s", backend_str, cfg)
+
             if not cfg or not isinstance(cfg, dict):
                 raise ValueError(f"Unknown queue backend: {backend_str!r}")
 

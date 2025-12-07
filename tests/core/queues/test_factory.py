@@ -14,6 +14,16 @@ async def test_create_queue_with_valid_memory_backend():
 
 
 @pytest.mark.asyncio
+async def test_create_queue_with_valid_disk_backend(tmp_path):
+    """create_queue instantiates DiskQueue."""
+    queue_path = tmp_path / "test_queue"
+    q = await factory.create_queue("qcrawl.core.queues.disk.DiskQueue", path=queue_path)
+    assert q is not None
+    assert q.__class__.__name__ == "DiskQueue"
+    await q.close()
+
+
+@pytest.mark.asyncio
 async def test_create_queue_with_init_kwargs():
     """create_queue passes init_kwargs to backend."""
     q = await factory.create_queue("qcrawl.core.queues.memory.MemoryPriorityQueue", maxsize=100)

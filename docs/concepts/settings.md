@@ -32,6 +32,13 @@ DELAY_PER_DOMAIN = 0.5
 TIMEOUT = 45.0
 MAX_RETRIES = 5
 USER_AGENT = "MyCrawler/1.0"
+
+QUEUE_BACKEND = "disk"  # or "memory", "redis"
+
+[QUEUE_BACKENDS.disk]
+class = "qcrawl.core.queues.disk.DiskQueue"
+path = ""  # Empty/null = system temp dir (cross-platform)
+maxsize = 0  # Max requests count (0 = unlimited)
 ```
 
 ### Environment variables
@@ -45,6 +52,13 @@ export QCRAWL_DELAY_PER_DOMAIN="0.5"
 export QCRAWL_TIMEOUT="45.0"
 export QCRAWL_MAX_RETRIES="5"
 export QCRAWL_USER_AGENT="MyCrawler/1.0"
+
+# Queue backend selection
+export QCRAWL_QUEUE_BACKEND="disk"  # or "memory", "redis"
+
+# Disk queue configuration (optional)
+export QCRAWL_QUEUE_BACKENDS__disk__path="/var/qcrawl/queue"
+export QCRAWL_QUEUE_BACKENDS__disk__maxsize="10000"  # Max requests count
 ```
 
 !!! warning
@@ -63,7 +77,10 @@ qcrawl mypackage.spiders:QuotesSpider \
   -s DELAY_PER_DOMAIN=0.5 \
   -s TIMEOUT=45.0 \
   -s MAX_RETRIES=5 \
-  -s USER_AGENT="MyCrawler/1.0"
+  -s USER_AGENT="MyCrawler/1.0" \
+  -s QUEUE_BACKEND=disk \
+  -s QUEUE_BACKENDS.disk.path=/tmp/my_queue \
+  -s QUEUE_BACKENDS.disk.maxsize=10000
 ```
 
 !!! warning
@@ -89,6 +106,13 @@ class MySpider(Spider):
         "TIMEOUT": 45.0,
         "MAX_RETRIES": 5,
         "USER_AGENT": "MyCrawler/1.0",
+        "QUEUE_BACKEND": "disk",
+        "QUEUE_BACKENDS": {
+            "disk": {
+                "path": "/tmp/my_spider_queue",
+                "maxsize": 10000,  # Max requests count
+            }
+        },
     }
 
     async def parse(self, response):
@@ -98,17 +122,24 @@ class MySpider(Spider):
 ## Settings reference
 
 ### Queue settings
-| Setting           | Type    | Default    | Notes                                                                         |
-|-------------------|---------|------------|-------------------------------------------------------------------------------|
-| `QUEUE_BACKEND`   | `str`   | `memory`   | Set which backend from `QUEUE_BACKENDS` (`memory`, `redis`, or custom) to use |
-| `QUEUE_BACKENDS`  | `dict`  | see below  | Mapping of backend name → backend config template                             |
+| Setting           | Type    | Default    | Env variable            | Notes                                                                   |
+|-------------------|---------|------------|-------------------------|-------------------------------------------------------------------------|
+| `QUEUE_BACKEND`   | `str`   | `memory`   | `QCRAWL_QUEUE_BACKEND`  | Backend to use: `memory`, `disk`, `redis`, or custom                    |
+| `QUEUE_BACKENDS`  | `dict`  | see below  | `QCRAWL_QUEUE_BACKENDS` | Mapping of backend name → backend config (see structure below)          |
+
+**QUEUE_BACKENDS structure:**
 
 ```toml
-QUEUE_BACKEND = "memory"  # or "redis"
+QUEUE_BACKEND = "memory"  # or "disk", "redis"
 
 [QUEUE_BACKENDS.memory]
 class = "qcrawl.core.queues.memory.MemoryPriorityQueue"
-maxsize = 0 # 0 = unlimited
+maxsize = 0  # Max requests count (0 = unlimited)
+
+[QUEUE_BACKENDS.disk]
+class = "qcrawl.core.queues.disk.DiskQueue"
+path = ""  # Empty/null = system temp dir (cross-platform)
+maxsize = 0  # Max requests count (0 = unlimited)
 
 [QUEUE_BACKENDS.redis]
 class = "qcrawl.core.queues.redis.RedisQueue"
@@ -119,14 +150,14 @@ user = "user"
 password = "pass"
 namespace = "qcrawl"
 ssl = false
-maxsize = 0 # 0 = unlimited
+maxsize = 0  # Max requests count (0 = unlimited)
 dedupe = false
 update_priority = false
 fingerprint_size = 16
-item_ttl = 86400 # seconds, 0 = no expiration
-dedupe_ttl = 604800 # seconds, 0 = no expiration
+item_ttl = 86400  # seconds, 0 = no expiration
+dedupe_ttl = 604800  # seconds, 0 = no expiration
 max_orphan_retries = 10
-redis_kwargs = {} # driver-specific options passed to redis client
+redis_kwargs = {}  # driver-specific options passed to redis client
 ```
 
 !!! info "Redis version compatibility"
