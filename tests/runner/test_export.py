@@ -166,7 +166,6 @@ async def test_register_export_handlers_file_export(tmp_path):
     register_export_handlers(
         dispatcher=dispatcher,
         exporter=exporter,
-        pipeline_mgr=None,
         crawler=crawler,
         storage=None,
         file_path=output_file,
@@ -206,7 +205,6 @@ async def test_register_export_handlers_stdout_export(capsys):
     register_export_handlers(
         dispatcher=dispatcher,
         exporter=exporter,
-        pipeline_mgr=None,
         crawler=crawler,
         storage=None,
         file_path=Path("-"),
@@ -242,7 +240,6 @@ async def test_register_export_handlers_multiple_items(tmp_path):
     register_export_handlers(
         dispatcher=dispatcher,
         exporter=exporter,
-        pipeline_mgr=None,
         crawler=crawler,
         storage=None,
         file_path=output_file,
@@ -286,7 +283,6 @@ async def test_register_export_handlers_buffered_json(tmp_path):
     register_export_handlers(
         dispatcher=dispatcher,
         exporter=exporter,
-        pipeline_mgr=None,
         crawler=crawler,
         storage=None,
         file_path=output_file,
@@ -325,7 +321,6 @@ async def test_register_export_handlers_requires_path_or_storage():
         register_export_handlers(
             dispatcher=dispatcher,
             exporter=exporter,
-            pipeline_mgr=None,
             crawler=crawler,
             storage=None,
             file_path=None,

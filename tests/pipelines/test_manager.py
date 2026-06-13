@@ -392,6 +392,22 @@ def test_from_settings_with_valid_pipeline():
     assert isinstance(manager.pipelines[0], DuplicateFilterPipeline)
 
 
+def test_from_settings_reads_pipelines_from_settings_object():
+    """from_settings loads the canonical UPPERCASE PIPELINES key from a Settings object.
+
+    Regression: the old lowercase lookup returned None for a Settings instance, so
+    PIPELINES never loaded (pipelines were a silent no-op even via the runner).
+    """
+    from qcrawl.settings import Settings
+
+    settings = Settings(PIPELINES={"qcrawl.pipelines.validation.ValidationPipeline": 200})
+
+    manager = PipelineManager.from_settings(settings)
+
+    assert len(manager.pipelines) == 1
+    assert isinstance(manager.pipelines[0], ValidationPipeline)
+
+
 def test_from_settings_with_multiple_pipelines_ordered():
     """from_settings loads multiple pipelines in priority order."""
     settings = {

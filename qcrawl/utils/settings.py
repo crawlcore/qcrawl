@@ -238,7 +238,7 @@ def shallow_merge_dicts(base: dict[str, object], overrides: dict[str, object]) -
     return merged
 
 
-def get_setting(snapshot: Settings | dict[str, object] | None, name: str) -> object:
+def get_setting(snapshot: Settings | Mapping[str, object] | None, name: str) -> object:
     """Case-insensitive lookup for a Settings-like snapshot or plain dict.
 
     - For dict snapshots: compare keys by uppercasing (return first matching value).

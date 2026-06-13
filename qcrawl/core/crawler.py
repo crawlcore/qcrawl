@@ -16,6 +16,7 @@ from qcrawl.core.stats import StatsCollector
 from qcrawl.downloaders import DownloadHandlerManager
 from qcrawl.middleware import DownloaderMiddleware
 from qcrawl.middleware.base import SpiderMiddleware
+from qcrawl.pipelines.manager import PipelineManager
 from qcrawl.utils.fingerprint import RequestFingerprinter
 from qcrawl.utils.settings import resolve_dotted_path
 
@@ -46,7 +47,7 @@ class Crawler:
         self.engine: CrawlEngine | None = None
         self._pending_middlewares: list[object] = []
         self.stats = StatsCollector()
-        self.pipeline_mgr = None
+        self.pipeline_mgr: PipelineManager | None = None
 
         # Record connected global handlers for deterministic cleanup
         self._stats_handlers: list[tuple[str, Callable[..., Awaitable[object | None]]]] = []
@@ -308,6 +309,13 @@ class Crawler:
             except Exception:
                 logger.exception("Error closing middleware hooks")
 
+            # Close the item pipeline (owned by the Crawler).
+            try:
+                if self.pipeline_mgr is not None:
+                    await self.pipeline_mgr.close_spider(self.spider)
+            except Exception:
+                logger.exception("Error closing pipeline manager")
+
             # print final stats snapshot
             logger.info("Final stats:\n%s", self.stats.log_stats())
 
@@ -453,8 +461,16 @@ class Crawler:
 
             self._setup_stats_handlers()
 
+            # Build the item pipeline on the engine's direct path. PIPELINES is a
+            # settings-driven concern owned by the Crawler; pipelines run as an
+            # explicit step before item_scraped/item_dropped are emitted, so they
+            # apply whether or not anything subscribes to those signals.
+            self.pipeline_mgr = PipelineManager.from_settings(final_settings)
+            self.engine._item_processor = self.pipeline_mgr.process_item
+
             # Lifecycle hooks and crawl execution
             await self._call_middlewares_open_spider()
+            await self.pipeline_mgr.open_spider(self.spider)
             await self.spider.open_spider(self.engine)
             await self.spider.signals.send_async("spider_opened", spider=self.spider)
 
@@ -536,6 +552,10 @@ class Crawler:
             spider = spider or sender
             self.stats.inc_value("pipeline/item_scraped_count")
 
+        async def on_item_dropped(sender, item=None, spider=None, **kwargs):
+            spider = spider or sender
+            self.stats.inc_value("pipeline/item_dropped_count")
+
         async def on_request_scheduled(sender, request, spider=None, **kwargs):
             spider = spider or sender
             self.stats.inc_value("scheduler/request_scheduled_count")
@@ -580,6 +600,7 @@ class Crawler:
         _try_connect("spider_opened", on_spider_opened)
         _try_connect("spider_closed", on_spider_closed)
         _try_connect("item_scraped", on_item_scraped)
+        _try_connect("item_dropped", on_item_dropped)
         _try_connect("request_scheduled", on_request_scheduled)
         _try_connect("request_reached_downloader", on_request_reached_downloader)
         _try_connect("response_received", on_response_received)

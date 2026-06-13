@@ -8,8 +8,11 @@ from typing import TYPE_CHECKING
 from qcrawl.pipelines.base import DropItem, ItemPipeline
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from qcrawl.core.item import Item
     from qcrawl.core.spider import Spider
+    from qcrawl.settings import Settings as RuntimeSettings
 
 logger = logging.getLogger(__name__)
 
@@ -104,11 +107,12 @@ class PipelineManager:
                 logger.exception("Error closing pipeline %s", pipeline.__class__.__name__)
 
     @classmethod
-    def from_settings(cls, settings: object | None) -> PipelineManager:
+    def from_settings(
+        cls, settings: RuntimeSettings | Mapping[str, object] | None
+    ) -> PipelineManager:
         """Create PipelineManager from a runtime settings snapshot or plain dict.
 
-        The factory looks for `pipelines` on a settings object or accepts a plain
-        dict with that key. The value must be a dict mapping dotted pipeline
+        Reads the canonical `PIPELINES` setting: a dict mapping dotted pipeline
         path strings -> integer order (i.e. `dict[str, int]`). Entries that do
         not conform are ignored with a debug log.
 
@@ -119,12 +123,11 @@ class PipelineManager:
         if settings is None:
             return pm
 
-        def _get_attr(name: str):
-            if isinstance(settings, dict):
-                return settings.get(name)
-            return getattr(settings, name, None)
+        # Canonical settings key is UPPERCASE PIPELINES; get_setting resolves it
+        # case-insensitively for Settings objects and plain dicts alike.
+        from qcrawl.utils.settings import get_setting
 
-        val = _get_attr("pipelines")
+        val = get_setting(settings, "PIPELINES")
         if not val:
             return pm
 

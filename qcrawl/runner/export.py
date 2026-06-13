@@ -14,7 +14,6 @@ import aiofiles
 
 from qcrawl import exporters as _exporter
 from qcrawl import signals
-from qcrawl.pipelines.manager import PipelineManager
 from qcrawl.storage import Storage
 
 logger = logging.getLogger(__name__)
@@ -74,7 +73,6 @@ def build_exporter(
 def register_export_handlers(
     dispatcher: signals.SignalDispatcher,
     exporter: _exporter.Exporter,
-    pipeline_mgr: PipelineManager | None,
     crawler: object,
     *,
     storage: Storage | None,
@@ -160,31 +158,12 @@ def register_export_handlers(
     async def _on_item_scraped(
         sender: object, item: Item, spider: Spider | None = None, **kwargs: object
     ) -> None:
-        # Prefer a local variable to avoid reassigning annotated param with raw sender.
+        # item_scraped is the post-pipeline signal (the Crawler runs PIPELINES on
+        # the item's data path), so the exporter just serializes what it receives.
         local_spider = spider or sender
         try:
-            processed: Item | None = item
-            if pipeline_mgr is not None:
-                try:
-                    # pipeline_mgr.process_item expects a Spider; the dispatcher may pass sender.
-                    # Use a type-ignore here to avoid runtime imports / circular references.
-                    processed = await pipeline_mgr.process_item(item, local_spider)  # type: ignore[arg-type]
-                except Exception:
-                    # A pipeline raised an unexpected error (DropItem is handled
-                    # inside process_item and returns None). Log loudly with the
-                    # traceback instead of silently dropping the item, then skip
-                    # this item so the crawl continues.
-                    logger.exception(
-                        "Pipeline error while processing item for %s; item not exported",
-                        getattr(local_spider, "name", None),
-                    )
-                    return
-
-            if processed is None:
-                return
-
             try:
-                data = exporter.serialize_item(processed)
+                data = exporter.serialize_item(item)
             except Exception:
                 logger.exception(
                     "Exporter failed to serialize item for %s", getattr(local_spider, "name", None)

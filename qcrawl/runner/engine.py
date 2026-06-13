@@ -12,7 +12,6 @@ from qcrawl.core import Spider
 from qcrawl.core.crawler import Crawler
 from qcrawl.core.queues.factory import create_queue
 from qcrawl.runner.export import build_exporter, register_export_handlers
-from qcrawl.runner.pipelines import wire_pipeline_manager
 from qcrawl.settings import Settings as RuntimeSettings
 from qcrawl.storage import FileStorage, Storage
 
@@ -123,10 +122,8 @@ async def run(
         global_dispatcher = signals.signals_dispatcher
         crawler._cli_signal_handlers = []
 
-        # Pipeline wiring (runtime-settings driven) - shared helper
-        pipeline_mgr = wire_pipeline_manager(runtime_settings, crawler)
-
-        # Exporter wiring (register handlers that invoke pipelines before writing)
+        # Exporter wiring. Pipelines are owned by the Crawler and run on the
+        # item's data path before item_scraped; the exporter only serializes.
         # CLI args take precedence; if not provided, consult spider custom_settings.
         export_path = getattr(args, "export", None)
         export_format = getattr(args, "export_format", None)
@@ -185,7 +182,6 @@ async def run(
                 register_export_handlers(
                     global_dispatcher,
                     exporter,
-                    pipeline_mgr,
                     crawler,
                     storage=storage_obj,
                     file_path=None,
@@ -214,7 +210,6 @@ async def run(
                     register_export_handlers(
                         global_dispatcher,
                         exporter,
-                        pipeline_mgr,
                         crawler,
                         storage=None,
                         file_path=Path(export_path),
