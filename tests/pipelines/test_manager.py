@@ -184,8 +184,8 @@ async def test_process_item_stops_on_drop(dummy_spider):
 
 
 @pytest.mark.asyncio
-async def test_process_item_stops_chain_on_error(dummy_spider):
-    """Pipeline chain stops on error and doesn't process remaining pipelines."""
+async def test_process_item_reraises_unexpected_error(dummy_spider):
+    """Unexpected pipeline errors are re-raised, not silently turned into a drop."""
     manager = PipelineManager()
 
     counter1 = CountingPipeline()
@@ -197,9 +197,9 @@ async def test_process_item_stops_chain_on_error(dummy_spider):
     manager.add_pipeline(counter2)
 
     item = Item(data={"title": "test"})
-    result = await manager.process_item(item, dummy_spider)
+    with pytest.raises(ValueError, match="Test error"):
+        await manager.process_item(item, dummy_spider)
 
-    assert result is None
     assert counter1.count == 1
     assert counter2.count == 0
 

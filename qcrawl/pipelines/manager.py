@@ -49,8 +49,14 @@ class PipelineManager:
     async def process_item(self, item: Item, spider: Spider) -> Item | None:
         """Run an item through the pipeline chain.
 
-        Returns:
-            The processed item (possibly transformed) or `None` if dropped/errored.
+        Returns the processed item (possibly transformed), or `None` if a
+        pipeline deliberately dropped it by raising `DropItem`.
+
+        `DropItem` is the ONLY way to drop an item. Any other exception is a bug
+        in a pipeline, not an intentional drop: it is logged with a full
+        traceback and re-raised so the caller surfaces it, rather than being
+        silently swallowed into a `None` (which would be indistinguishable from
+        a deliberate drop and would silently lose scraped data).
         """
         current = item
         for pipeline in self.pipelines:
@@ -65,10 +71,11 @@ class PipelineManager:
                 return None
             except Exception:
                 logger.exception(
-                    "Unhandled error in pipeline %s while processing item",
+                    "Unhandled error in pipeline %s while processing item; re-raising "
+                    "(raise DropItem to drop an item intentionally)",
                     pipeline.__class__.__name__,
                 )
-                return None
+                raise
 
             # Treat explicit None as a drop (be permissive about returned types)
             if current is None:

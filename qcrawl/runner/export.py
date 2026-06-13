@@ -170,6 +170,14 @@ def register_export_handlers(
                     # Use a type-ignore here to avoid runtime imports / circular references.
                     processed = await pipeline_mgr.process_item(item, local_spider)  # type: ignore[arg-type]
                 except Exception:
+                    # A pipeline raised an unexpected error (DropItem is handled
+                    # inside process_item and returns None). Log loudly with the
+                    # traceback instead of silently dropping the item, then skip
+                    # this item so the crawl continues.
+                    logger.exception(
+                        "Pipeline error while processing item for %s; item not exported",
+                        getattr(local_spider, "name", None),
+                    )
                     return
 
             if processed is None:
