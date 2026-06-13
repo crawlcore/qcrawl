@@ -113,12 +113,29 @@ def test_is_offsite_subdomain():
     assert middleware._is_offsite("https://api.example.com/page", {"example.com"}) is False
 
 
-def test_is_offsite_parent_domain():
-    """_is_offsite allows parent domain when subdomain is allowed."""
+def test_is_offsite_parent_domain_rejected():
+    """Parent/sibling domains are offsite when only a subdomain is allowed (scope-escape regression)."""
     middleware = OffsiteMiddleware()
 
-    # example.com should be allowed when api.example.com is in allowed
-    assert middleware._is_offsite("https://example.com/page", {"api.example.com"}) is False
+    # Parent domain is offsite.
+    assert middleware._is_offsite("https://example.com/page", {"api.example.com"}) is True
+    # Sibling subdomain is offsite.
+    assert middleware._is_offsite("https://www.example.com/page", {"api.example.com"}) is True
+    # The allowed subdomain itself is still on-site.
+    assert middleware._is_offsite("https://api.example.com/page", {"api.example.com"}) is False
+
+
+def test_is_offsite_single_label_no_public_suffix_match():
+    """A single-label allowed entry matches by exact host only, never as a suffix.
+
+    Guards against e.g. ``allowed={"com"}`` admitting arbitrary ``*.com`` hosts.
+    """
+    middleware = OffsiteMiddleware()
+
+    # "com" must not act as a public suffix admitting evil.com.
+    assert middleware._is_offsite("https://evil.com/page", {"com"}) is True
+    # Exact single-label host still matches (e.g. an intranet host).
+    assert middleware._is_offsite("https://com/page", {"com"}) is False
 
 
 def test_is_offsite_invalid_url():
@@ -431,3 +448,31 @@ async def test_multiple_allowed_domains(spider):
 
     # First two should pass, third filtered
     assert len(results) == 2
+
+
+@pytest.mark.asyncio
+async def test_process_spider_output_filters_parent_when_only_subdomain_allowed(spider):
+    """Only the allowed subdomain passes; parent and sibling domains are filtered."""
+    middleware = OffsiteMiddleware()
+    spider.ALLOWED_DOMAINS = ["api.example.com"]
+    parent_request = Request(url="https://api.example.com/parent")
+    response = Page(
+        url="https://api.example.com/parent",
+        content=b"",
+        status_code=200,
+        headers={},
+        request=parent_request,
+    )
+
+    async def spider_output():
+        yield Request(url="https://example.com/page")  # parent — offsite
+        yield Request(url="https://www.example.com/page")  # sibling — offsite
+        yield Request(url="https://api.example.com/page")  # allowed
+
+    results = []
+    async for item in middleware.process_spider_output(response, spider_output(), spider):
+        results.append(item)
+
+    assert len(results) == 1
+    assert isinstance(results[0], Request)
+    assert results[0].url == "https://api.example.com/page"

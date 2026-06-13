@@ -69,7 +69,17 @@ class OffsiteMiddleware(SpiderMiddleware):
             return None
 
     def _is_offsite(self, url: str, allowed_domains: set[str]) -> bool:
-        """Return True if URL is offsite (not allowed)."""
+        """Return True if URL is offsite (not allowed).
+
+        A URL is on-site when its host exactly matches an allowed domain or is a
+        subdomain of one. Subdomain matching only applies to multi-label allowed
+        domains (those containing a dot), so a single-label entry such as
+        ``"com"`` matches by exact host only and cannot act as a public suffix
+        that admits every host beneath it.
+
+        Restricting to a subdomain (e.g. ``"api.example.com"``) does NOT admit
+        the parent ``example.com`` or sibling subdomains.
+        """
         domain = self._extract_domain(url)
         if not domain:
             return True
@@ -78,10 +88,10 @@ class OffsiteMiddleware(SpiderMiddleware):
             return False
 
         for allowed in allowed_domains:
-            if domain.endswith(f".{allowed}"):
-                return False
-            # Allow reciprocal rule: if allowed is a subdomain, accepting base domain
-            if allowed.endswith(f".{domain}"):
+            # Only treat `allowed` as a parent for subdomain matching when it has
+            # at least two labels; this prevents matching arbitrary hosts under a
+            # public suffix (e.g. allowed="com" must not admit "evil.com").
+            if "." in allowed and domain.endswith(f".{allowed}"):
                 return False
 
         return True
