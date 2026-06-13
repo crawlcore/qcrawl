@@ -206,6 +206,18 @@ def test_csv_exporter_empty_values():
     assert "Alice" in text
 
 
+def test_csv_exporter_neutralizes_formula_injection():
+    """CsvExporter prefixes formula-triggering string cells with a quote."""
+    exporter = CsvExporter()
+    item = Item(data={"formula": "=SUM(A1:A2)", "at": "@cmd", "name": "safe"})
+
+    text = exporter.serialize_item(item).decode("utf-8")
+
+    assert "'=SUM(A1:A2)" in text
+    assert "'@cmd" in text
+    assert "'safe" not in text
+
+
 # XmlExporter Tests
 
 

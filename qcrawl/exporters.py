@@ -9,6 +9,18 @@ import orjson
 
 from qcrawl.core.item import Item
 
+# Characters that spreadsheet apps (Excel, Sheets, LibreOffice) interpret as the
+# start of a formula. A CSV cell beginning with one of these is a formula-
+# injection vector, so it is prefixed with a single quote to neutralize it.
+_CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _neutralize_csv_value(value: object) -> object:
+    """Prefix formula-triggering string cells with a quote; pass others through."""
+    if isinstance(value, str) and value and value[0] in _CSV_FORMULA_PREFIXES:
+        return "'" + value
+    return value
+
 
 @runtime_checkable
 class Exporter(Protocol):
@@ -102,6 +114,7 @@ class CsvExporter:
 
     def serialize_item(self, item: Item) -> bytes:
         data = dict(item.data) if hasattr(item, "data") else dict(item)
+        data = {k: _neutralize_csv_value(v) for k, v in data.items()}
 
         # Dynamically expand fieldnames if new keys appear
         new_fields = data.keys() - self._fieldnames
