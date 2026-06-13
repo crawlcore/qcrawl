@@ -2,33 +2,26 @@ import inspect
 from collections.abc import AsyncGenerator, AsyncIterable
 from typing import TYPE_CHECKING
 
-from qcrawl.core.response import Page
-from qcrawl.middleware.base import (
-    Action,
-    DownloaderMiddleware,
-    MiddlewareResult,
-    SpiderMiddleware,
-)
+from qcrawl.middleware.base import DownloaderMiddleware, SpiderMiddleware
 
 if TYPE_CHECKING:
     from qcrawl.core.item import Item
     from qcrawl.core.request import Request
+    from qcrawl.core.response import Page
     from qcrawl.core.spider import Spider
 
 
 class MiddlewareManager:
-    """Coordinate downloader and spider middleware chains.
+    """Coordinate the spider middleware chains.
 
-    The manager accepts two middleware stacks:
-      - downloader: list of DownloaderMiddleware — called during request/response/exception phases
-        in the same order as registered for `process_request` and in reversed order for
-        `process_response`/`process_exception`.
-      - spider: list of SpiderMiddleware — called for spider-facing phases. Each spider
-        middleware method must return an *async iterable* (async-generator) when it returns
-        a non-None value.
+    Runs the spider-facing phases (start_requests, input, output, exception);
+    each spider middleware method must return an *async iterable* when it
+    returns a non-None value, and the manager validates that contract.
 
-    This class performs strict validation of middleware contracts and raises informative
-    `TypeError` messages when middleware violates the required return types.
+    The `downloader` middleware list is held for reference (and reported by
+    `__repr__`), but the downloader request/response/exception chain is executed
+    by the engine (`CrawlEngine._run_middleware_chain`), the single owner of that
+    logic.
     """
 
     def __init__(
@@ -38,83 +31,6 @@ class MiddlewareManager:
     ) -> None:
         self.downloader: list[DownloaderMiddleware] = downloader or []
         self.spider: list[SpiderMiddleware] = spider or []
-
-    async def process_request(self, request: "Request", spider: "Spider") -> MiddlewareResult:
-        """Run downloader `process_request` chain.
-
-        Behavior:
-          - Call each downloader middleware in registration order.
-          - Each middleware must return a `MiddlewareResult`.
-          - If result.action is `Action.CONTINUE` the chain proceeds to the next middleware.
-          - Any other action is returned immediately to the caller.
-        """
-        for mw in self.downloader:
-            result = await mw.process_request(request, spider)
-            if not isinstance(result, MiddlewareResult):
-                raise TypeError(
-                    f"{mw!r}.process_request must return MiddlewareResult, got {type(result)!r}"
-                )
-            if result.action is Action.CONTINUE:
-                continue
-            return result
-        return MiddlewareResult.continue_()
-
-    async def process_response(
-        self, request: "Request", response: "Page", spider: "Spider"
-    ) -> MiddlewareResult:
-        """Run downloader `process_response` chain in reverse order.
-
-        Each middleware may:
-        - return `MiddlewareResult.CONTINUE` to let the previous middleware
-          in reversed order handle the response,
-        - return `MiddlewareResult.KEEP` with a replacement `Page` payload,
-        - return `MiddlewareResult.RETRY` or `MiddlewareResult.DROP` to short-circuit.
-        """
-        current: Page = response
-
-        for mw in reversed(self.downloader):
-            result = await mw.process_response(request, current, spider)
-            if not isinstance(result, MiddlewareResult):
-                raise TypeError(
-                    f"{mw!r}.process_response must return MiddlewareResult, got {type(result)!r}"
-                )
-
-            if result.action is Action.CONTINUE:
-                continue
-
-            if result.action is Action.KEEP:
-                payload = result.payload
-                if not isinstance(payload, Page):
-                    raise TypeError("MiddlewareResult.keep payload must be a Page")
-                current = payload
-                continue
-
-            if result.action in (Action.RETRY, Action.DROP):
-                return result
-
-        return MiddlewareResult.keep(current)
-
-    async def process_exception(
-        self, request: "Request", exception: BaseException, spider: "Spider"
-    ) -> MiddlewareResult:
-        """Run downloader `process_exception` chain in reverse order.
-
-        Behavior:
-          - Called when the downloader raised an exception.
-          - Middleware may return RETRY/DROP/CONTINUE/KEEP semantics using `MiddlewareResult`.
-          - First non-CONTINUE result is returned.
-        """
-
-        for mw in reversed(self.downloader):
-            result = await mw.process_exception(request, exception, spider)
-            if not isinstance(result, MiddlewareResult):
-                raise TypeError(
-                    f"{mw!r}.process_exception must return MiddlewareResult, got {type(result)!r}"
-                )
-            if result.action is Action.CONTINUE:
-                continue
-            return result
-        return MiddlewareResult.continue_()
 
     def process_start_requests(
         self, start_requests: AsyncIterable["Request"], spider: "Spider"

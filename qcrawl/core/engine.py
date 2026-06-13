@@ -21,6 +21,8 @@ from qcrawl.middleware.base import Action, MiddlewareResult
 from qcrawl.middleware.manager import MiddlewareManager
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from qcrawl.core.crawler import Crawler
 
 logger = logging.getLogger(__name__)
@@ -47,6 +49,7 @@ class CrawlEngine:
         "_running",
         "crawler",
         "_mw_manager",
+        "_item_processor",
     )
 
     def __init__(
@@ -73,6 +76,11 @@ class CrawlEngine:
 
         self._running = False
         self.crawler: Crawler | None = None
+        # Optional direct-path item processor (set by the Crawler to
+        # PipelineManager.process_item). Returns the processed item, or None if a
+        # pipeline dropped it. Pipelines run here, on the item's data path — not
+        # via a signal handler — so item_scraped/item_dropped stay observation-only.
+        self._item_processor: Callable[[Item, Spider], Awaitable[Item | None]] | None = None
 
     def add_middleware(self, mw: DownloaderMiddleware) -> None:
         """Register a downloader middleware before crawl starts.
@@ -383,46 +391,93 @@ class CrawlEngine:
         # Apply spider middlewares (they are responsible for depth & normalization)
         wrapped_ag = self._mw_manager.process_spider_output(response, parsed_ag, self.spider)
 
-        async for result in wrapped_ag:
-            if isinstance(result, (Item, dict)):
-                item = result if isinstance(result, Item) else Item(data=result)
+        # Drive the spider output stream. An exception raised while producing
+        # output (the spider's parse() body or a spider middleware) is offered to
+        # process_spider_exception; if no middleware returns recovery output it
+        # re-raises, so the worker's existing handling and stats still see it.
+        # Errors while emitting a result (scheduler/signal) are not caught here.
+        ait = wrapped_ag.__aiter__()
+        while True:
+            try:
+                result = await ait.__anext__()
+            except StopAsyncIteration:
+                break
+            except Exception as spider_exc:
+                recovery = await self._mw_manager.process_spider_exception(
+                    response, spider_exc, self.spider
+                )
+                if recovery is None:
+                    raise
                 if logger.isEnabledFor(logging.DEBUG):
                     logger.debug(
-                        "item_scraped %s from %s",
+                        "spider_exception handled by middleware for url=%s err=%s",
+                        getattr(request, "url", None),
+                        str(spider_exc),
+                    )
+                async for recovered in recovery:
+                    await self._emit_parse_result(recovered)
+                break
+            await self._emit_parse_result(result)
+
+    async def _emit_parse_result(self, result: object) -> None:
+        """Dispatch one value yielded by spider parse (or exception recovery).
+
+        Items are emitted as item_scraped; Requests (and bare URL strings) are
+        scheduled; anything else is logged and ignored.
+        """
+        if isinstance(result, (Item, dict)):
+            item = result if isinstance(result, Item) else Item(data=result)
+            # Run the item through the pipeline on its data path. item_scraped is
+            # emitted only for items that survive; a pipeline drop (None) emits
+            # item_dropped instead. Both are observation-only signals.
+            processed: Item | None = item
+            if self._item_processor is not None:
+                processed = await self._item_processor(item, self.spider)
+            if processed is None:
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "item_dropped %s from %s",
                         getattr(item, "data", None),
                         getattr(self.spider, "name", None),
                     )
-                await self.signals.send_async("item_scraped", item=item, spider=self.spider)
+                await self.signals.send_async("item_dropped", item=item, spider=self.spider)
+                return
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "item_scraped %s from %s",
+                    getattr(processed, "data", None),
+                    getattr(self.spider, "name", None),
+                )
+            await self.signals.send_async("item_scraped", item=processed, spider=self.spider)
 
-            elif isinstance(result, Request):
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(
-                        "scheduling request %s (priority=%s) from %s",
-                        getattr(result, "url", None),
-                        getattr(result, "priority", None),
-                        getattr(self.spider, "name", None),
-                    )
-                await self.scheduler.add(result)
+        elif isinstance(result, Request):
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "scheduling request %s (priority=%s) from %s",
+                    getattr(result, "url", None),
+                    getattr(result, "priority", None),
+                    getattr(self.spider, "name", None),
+                )
+            await self.scheduler.add(result)
 
-            elif isinstance(result, str):
-                # Convert stray strings to Request and schedule (no depth enforcement here).
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(
-                        "scheduling URL string %s from %s",
-                        result,
-                        getattr(self.spider, "name", None),
-                    )
-                new_req = Request(url=result)
-                await self.scheduler.add(new_req)
+        elif isinstance(result, str):
+            # Convert stray strings to Request and schedule (no depth enforcement here).
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "scheduling URL string %s from %s",
+                    result,
+                    getattr(self.spider, "name", None),
+                )
+            await self.scheduler.add(Request(url=result))
 
-            else:
-                # Unknown yielded type: log and ignore
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(
-                        "Ignoring unexpected spider parse result type %s from %s",
-                        type(result),
-                        getattr(self.spider, "name", None),
-                    )
+        else:
+            # Unknown yielded type: log and ignore
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "Ignoring unexpected spider parse result type %s from %s",
+                    type(result),
+                    getattr(self.spider, "name", None),
+                )
 
     async def _handle_exception(self, request: Request, exc: Exception) -> None:
         """Handle exceptions raised while processing a request."""
