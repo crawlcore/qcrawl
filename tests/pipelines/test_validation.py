@@ -124,57 +124,61 @@ async def test_drops_item_missing_all_required_fields(spider_with_required):
         await pipeline.process_item(item, spider_with_required)
 
 
-# Falsy/Empty Required Fields Tests
-
-
-@pytest.mark.asyncio
-async def test_drops_item_with_empty_string_required_field(spider_with_required):
-    """Pipeline drops items with empty string in required field."""
-    pipeline = ValidationPipeline()
-    item = Item(data={"title": "", "url": "https://example.com"})
-
-    with pytest.raises(DropItem, match="Required field empty: title"):
-        await pipeline.process_item(item, spider_with_required)
+# None / Falsy Required Fields Tests
 
 
 @pytest.mark.asyncio
 async def test_drops_item_with_none_required_field(spider_with_required):
-    """Pipeline drops items with None in required field."""
+    """Pipeline drops items with None in a required field."""
     pipeline = ValidationPipeline()
     item = Item(data={"title": "Article", "url": None})
 
-    with pytest.raises(DropItem, match="Required field empty: url"):
+    with pytest.raises(DropItem, match="Required field is None: url"):
         await pipeline.process_item(item, spider_with_required)
 
 
 @pytest.mark.asyncio
-async def test_drops_item_with_zero_required_field(spider_with_required):
-    """Pipeline drops items with 0 in required field (falsy)."""
+async def test_keeps_item_with_empty_string_required_field(spider_with_required):
+    """Empty string is a present value and is kept, not dropped (regression)."""
+    pipeline = ValidationPipeline()
+    item = Item(data={"title": "", "url": "https://example.com"})
+
+    result = await pipeline.process_item(item, spider_with_required)
+
+    assert result is item
+
+
+@pytest.mark.asyncio
+async def test_keeps_item_with_zero_required_field(spider_with_required):
+    """0 is valid scraped data, not "empty", and is kept (regression)."""
     pipeline = ValidationPipeline()
     item = Item(data={"title": 0, "url": "https://example.com"})
 
-    with pytest.raises(DropItem, match="Required field empty: title"):
-        await pipeline.process_item(item, spider_with_required)
+    result = await pipeline.process_item(item, spider_with_required)
+
+    assert result is item
 
 
 @pytest.mark.asyncio
-async def test_drops_item_with_false_required_field(spider_with_required):
-    """Pipeline drops items with False in required field (falsy)."""
+async def test_keeps_item_with_false_required_field(spider_with_required):
+    """False is valid scraped data, not "empty", and is kept (regression)."""
     pipeline = ValidationPipeline()
     item = Item(data={"title": "Article", "url": False})
 
-    with pytest.raises(DropItem, match="Required field empty: url"):
-        await pipeline.process_item(item, spider_with_required)
+    result = await pipeline.process_item(item, spider_with_required)
+
+    assert result is item
 
 
 @pytest.mark.asyncio
-async def test_drops_item_with_empty_list_required_field(spider_with_required):
-    """Pipeline drops items with empty list in required field (falsy)."""
+async def test_keeps_item_with_empty_list_required_field(spider_with_required):
+    """An empty list is a present (non-None) value and is kept (regression)."""
     pipeline = ValidationPipeline()
     item = Item(data={"title": [], "url": "https://example.com"})
 
-    with pytest.raises(DropItem, match="Required field empty: title"):
-        await pipeline.process_item(item, spider_with_required)
+    result = await pipeline.process_item(item, spider_with_required)
+
+    assert result is item
 
 
 # Different REQUIRED_FIELDS Types
