@@ -104,6 +104,7 @@ class Scheduler:
             if self._pending == 0:
                 self._finished.set()
             self.seen.discard(fp)
+            await self.signals.send_async("request_dropped", request=request, exception=None)
 
     async def get(self) -> Request:
         """Get next request from scheduler (highest priority first).

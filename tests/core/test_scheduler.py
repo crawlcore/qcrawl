@@ -145,3 +145,29 @@ async def test_async_context_manager(scheduler):
 
     # After exit, scheduler is closed
     assert scheduler._closed is True
+
+
+@pytest.mark.asyncio
+async def test_queue_full_emits_request_dropped(scheduler, monkeypatch):
+    """A full-queue drop emits request_dropped and leaves no pending work."""
+    from qcrawl import signals
+
+    dropped: list[Request] = []
+
+    async def on_dropped(sender, request=None, exception=None, **kwargs):
+        dropped.append(request)
+
+    async def _raise_full(request, priority=0):
+        raise asyncio.QueueFull
+
+    monkeypatch.setattr(scheduler.queue, "put", _raise_full)
+    signals.signals_registry.connect("request_dropped", on_dropped, sender=scheduler, weak=False)
+    try:
+        await scheduler.add(Request(url="https://example.com/overflow"))
+    finally:
+        signals.signals_registry.disconnect("request_dropped", on_dropped, sender=scheduler)
+
+    assert len(dropped) == 1
+    assert dropped[0].url == "https://example.com/overflow"
+    assert scheduler.pending == 0
+    assert await scheduler.qsize() == 0
