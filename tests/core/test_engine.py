@@ -383,3 +383,49 @@ async def test_emit_parse_result_dropped_item_emits_item_dropped(engine):
 
     assert len(scraped) == 0
     assert len(dropped) == 1
+
+
+@pytest.mark.asyncio
+async def test_item_processor_error_drops_one_item_not_the_whole_response(mock_handler_manager):
+    """A processor error drops only that item; the rest of the parse output continues."""
+
+    async def buggy_processor(item, spider):
+        if item.data.get("id") == 2:
+            raise ValueError("processor bug")
+        return item
+
+    class ThreeItemSpider(Spider):
+        name = "three"
+        start_urls = ["https://example.com"]
+
+        async def parse(self, response):
+            yield {"id": 1}
+            yield {"id": 2}
+            yield {"id": 3}
+
+    engine = CrawlEngine(Mock(spec=Scheduler), mock_handler_manager, ThreeItemSpider())
+    engine._item_processor = buggy_processor
+
+    scraped: list[int] = []
+    dropped: list[int] = []
+
+    async def on_scraped(sender, item, spider=None, **kwargs):
+        scraped.append(item.data["id"])
+
+    async def on_dropped(sender, item=None, spider=None, **kwargs):
+        dropped.append(item.data["id"])
+
+    signals.signals_registry.connect("item_scraped", on_scraped, sender=engine, weak=False)
+    signals.signals_registry.connect("item_dropped", on_dropped, sender=engine, weak=False)
+    request = Request(url="https://example.com")
+    response = Page(
+        url="https://example.com", content=b"", status_code=200, headers={}, request=request
+    )
+    try:
+        await engine._process_parse_results(request, response)
+    finally:
+        signals.signals_registry.disconnect("item_scraped", on_scraped, sender=engine)
+        signals.signals_registry.disconnect("item_dropped", on_dropped, sender=engine)
+
+    assert scraped == [1, 3]
+    assert dropped == [2]

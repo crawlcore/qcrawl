@@ -432,7 +432,19 @@ class CrawlEngine:
             # item_dropped instead. Both are observation-only signals.
             processed: Item | None = item
             if self._item_processor is not None:
-                processed = await self._item_processor(item, self.spider)
+                try:
+                    processed = await self._item_processor(item, self.spider)
+                except Exception:
+                    # A pipeline raised an unexpected error (a deliberate DropItem
+                    # returns None instead). Log it, drop this one item, and
+                    # continue — one item's pipeline bug must not abort the rest
+                    # of the parse output.
+                    logger.exception(
+                        "Pipeline error processing item from %s; dropping it",
+                        getattr(self.spider, "name", None),
+                    )
+                    await self.signals.send_async("item_dropped", item=item, spider=self.spider)
+                    return
             if processed is None:
                 if logger.isEnabledFor(logging.DEBUG):
                     logger.debug(
