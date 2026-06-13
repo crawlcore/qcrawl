@@ -125,6 +125,36 @@ async def test_file_storage_write_appends_data(tmp_path):
     assert file_path.read_bytes() == b"Line 1\nLine 2\nLine 3\n"
 
 
+# FileStorage Path Safety Tests
+
+
+@pytest.mark.asyncio
+async def test_file_storage_write_rejects_parent_traversal(tmp_path):
+    """write rejects relative paths that escape the root via `..`."""
+    storage = FileStorage(root=tmp_path / "store")
+
+    with pytest.raises(ValueError, match="escapes storage root"):
+        await storage.write(b"x", "../escape.txt")
+
+
+@pytest.mark.asyncio
+async def test_file_storage_write_rejects_absolute_path(tmp_path):
+    """write rejects absolute paths that escape the root."""
+    storage = FileStorage(root=tmp_path / "store")
+
+    with pytest.raises(ValueError, match="escapes storage root"):
+        await storage.write(b"x", "/etc/passwd")
+
+
+@pytest.mark.asyncio
+async def test_file_storage_read_rejects_parent_traversal(tmp_path):
+    """read rejects relative paths that escape the root via `..`."""
+    storage = FileStorage(root=tmp_path / "store")
+
+    with pytest.raises(ValueError, match="escapes storage root"):
+        await storage.read("../../secret")
+
+
 # FileStorage Read Tests
 
 

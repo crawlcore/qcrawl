@@ -77,8 +77,20 @@ class FileStorage(Storage):
         self.root = Path(self.root)
         self.root.mkdir(parents=True, exist_ok=True)
 
+    def _resolve_within_root(self, path: str) -> Path:
+        """Resolve `path` under the storage root, rejecting traversal escapes.
+
+        Guards against absolute paths and ``..`` segments that would resolve
+        outside `self.root` (path-traversal). Raises ValueError on escape.
+        """
+        root = self.root.resolve()
+        candidate = (root / path).resolve()
+        if not candidate.is_relative_to(root):
+            raise ValueError(f"Path {path!r} escapes storage root {self.root}")
+        return candidate
+
     async def write(self, data: bytes, path: str) -> None:
-        abs_path = self.root / path
+        abs_path = self._resolve_within_root(path)
         await asyncio.to_thread(self._append_bytes_sync, abs_path, data)
 
     def _append_bytes_sync(self, path: Path, data: bytes) -> None:
@@ -89,7 +101,7 @@ class FileStorage(Storage):
             os.fsync(f.fileno())
 
     async def read(self, path: str) -> bytes:
-        abs_path = self.root / path
+        abs_path = self._resolve_within_root(path)
         return await asyncio.to_thread(self._read_bytes_sync, abs_path)
 
     def _read_bytes_sync(self, path: Path) -> bytes:
@@ -97,7 +109,7 @@ class FileStorage(Storage):
             return f.read()
 
     async def exists(self, path: str) -> bool:
-        abs_path = self.root / path
+        abs_path = self._resolve_within_root(path)
         return await asyncio.to_thread(abs_path.exists)
 
     async def close(self) -> None:
