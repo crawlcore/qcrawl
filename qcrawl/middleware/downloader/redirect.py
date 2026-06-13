@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 from qcrawl.core.request import Request
 from qcrawl.core.response import Page
 from qcrawl.middleware.base import DownloaderMiddleware, MiddlewareResult
-from qcrawl.utils.url import join_and_normalize
+from qcrawl.utils.url import get_domain, join_and_normalize
 
 if TYPE_CHECKING:
     from qcrawl.core.spider import Spider
@@ -102,6 +102,17 @@ class RedirectMiddleware(DownloaderMiddleware):
             new_url = loc
 
         new_req = request.copy(url=new_url)
+
+        # Security: never leak credentials across origins. When the redirect
+        # target host differs from the source host, strip sensitive headers that
+        # would otherwise ride along to a different origin (the behavior of
+        # browsers, curl, and requests).
+        if get_domain(new_url) != get_domain(response.url):
+            new_req.headers = {
+                k: v
+                for k, v in (new_req.headers or {}).items()
+                if k.lower() not in {"authorization", "cookie", "proxy-authorization"}
+            }
 
         if response.status_code in {307, 308}:
             new_req.method = request.method

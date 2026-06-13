@@ -133,6 +133,59 @@ async def test_process_response_handles_301_redirect(spider):
 
 
 @pytest.mark.asyncio
+async def test_redirect_strips_sensitive_headers_cross_host(spider):
+    """Cross-host redirect strips Authorization/Cookie; other headers are kept."""
+    middleware = RedirectMiddleware()
+    request = Request(
+        url="https://example.com/old",
+        headers={
+            "Authorization": "Bearer secret",
+            "Cookie": "session=abc",
+            "Proxy-Authorization": "Basic xyz",
+            "X-Custom": "keep-me",
+        },
+    )
+    response = Page(
+        url="https://example.com/old",
+        content=b"",
+        status_code=307,
+        headers={"Location": "https://evil.com/new"},
+        request=request,
+    )
+
+    result = await middleware.process_response(request, response, spider)
+
+    redirect_request = result.payload
+    assert "Authorization" not in redirect_request.headers
+    assert "Cookie" not in redirect_request.headers
+    assert "Proxy-Authorization" not in redirect_request.headers
+    assert redirect_request.headers["X-Custom"] == "keep-me"
+
+
+@pytest.mark.asyncio
+async def test_redirect_keeps_sensitive_headers_same_host(spider):
+    """Same-host redirect keeps Authorization/Cookie."""
+    middleware = RedirectMiddleware()
+    request = Request(
+        url="https://example.com/old",
+        headers={"Authorization": "Bearer secret", "Cookie": "session=abc"},
+    )
+    response = Page(
+        url="https://example.com/old",
+        content=b"",
+        status_code=307,
+        headers={"Location": "https://example.com/new"},
+        request=request,
+    )
+
+    result = await middleware.process_response(request, response, spider)
+
+    redirect_request = result.payload
+    assert redirect_request.headers["Authorization"] == "Bearer secret"
+    assert redirect_request.headers["Cookie"] == "session=abc"
+
+
+@pytest.mark.asyncio
 async def test_process_response_handles_302_redirect(spider):
     """process_response retries 302 redirect."""
     middleware = RedirectMiddleware()
