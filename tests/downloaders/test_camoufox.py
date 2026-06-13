@@ -175,6 +175,58 @@ async def test_create_all_contexts(mock_browser):
     assert mock_browser.new_context.call_count == 2
 
 
+# Persistent Context Tests
+
+
+@pytest.mark.asyncio
+async def test_create_all_contexts_persistent_maps_single_context(mock_context):
+    """persistent_context mode reuses the launched context instead of calling new_context."""
+    downloader = CamoufoxDownloader(
+        browser=mock_context,  # persistent mode hands back the context itself, not a Browser
+        contexts={"default": {}},
+        launch_options={"persistent_context": True},
+    )
+
+    await downloader._create_all_contexts()
+
+    assert downloader._contexts["default"] is mock_context
+    assert "default" in downloader._page_semaphores
+    mock_context.new_context.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_create_all_contexts_persistent_maps_all_names_to_one_context(mock_context):
+    """persistent mode maps every configured name to the single persistent context."""
+    downloader = CamoufoxDownloader(
+        browser=mock_context,
+        contexts={"default": {}, "mobile": {"viewport": {"width": 375}}},
+        launch_options={"persistent_context": True},
+    )
+
+    await downloader._create_all_contexts()
+
+    assert downloader._contexts["default"] is mock_context
+    assert downloader._contexts["mobile"] is mock_context
+    assert downloader._page_semaphores["default"] is downloader._page_semaphores["mobile"]
+    mock_context.new_context.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_close_persistent_context_closed_once(mock_context):
+    """persistent mode closes the single context/browser exactly once (no double close)."""
+    downloader = CamoufoxDownloader(
+        browser=mock_context,
+        own_browser=True,
+        contexts={"default": {}},
+        launch_options={"persistent_context": True},
+    )
+    await downloader._create_all_contexts()
+
+    await downloader.close()
+
+    assert mock_context.close.await_count == 1
+
+
 def test_get_context_returns_existing(camoufox_downloader, mock_context):
     """_get_context() returns pre-created context."""
     camoufox_downloader._contexts["default"] = mock_context

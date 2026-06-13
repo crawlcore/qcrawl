@@ -84,6 +84,7 @@ class CamoufoxDownloader:
         "_max_pages_per_context",
         "_default_timeout",
         "_launch_options",
+        "_persistent",
         "_abort_request",
         "_process_request_headers",
     )
@@ -130,6 +131,7 @@ class CamoufoxDownloader:
         # Settings
         self._default_timeout = default_timeout
         self._launch_options = launch_options or {}
+        self._persistent = bool(self._launch_options.get("persistent_context"))
         self._abort_request = abort_request
         self._process_request_headers = process_request_headers
 
@@ -221,7 +223,28 @@ class CamoufoxDownloader:
 
         Each context is created once and reused for all requests.
         Creates a per-context semaphore to limit concurrent pages.
+
+        In persistent_context mode the launched object is already the single
+        persistent context (it cannot spawn child contexts), so every configured
+        name is mapped to that one context instead of calling ``new_context``.
         """
+        if self._persistent:
+            names = list(self._context_configs.keys()) or ["default"]
+            if len(names) > 1:
+                logger.warning(
+                    "persistent_context supports a single browser context; mapping all "
+                    "configured CAMOUFOX_CONTEXTS names %s to the one persistent context",
+                    names,
+                )
+            # All names share the one persistent context, so they share a single
+            # page semaphore (concurrent pages are bounded on that one context).
+            semaphore = asyncio.Semaphore(self._max_pages_per_context)
+            for name in names:
+                self._contexts[name] = self._browser
+                self._page_semaphores[name] = semaphore
+            logger.debug("Using single persistent context for names: %s", names)
+            return
+
         for name, config in self._context_configs.items():
             try:
                 # Create context with configuration
@@ -581,8 +604,13 @@ class CamoufoxDownloader:
 
         self._closed = True
 
-        # Close all contexts
+        # Close all contexts. In persistent mode every name maps to the same
+        # context object, so close each distinct context only once.
+        closed: set[int] = set()
         for name, context in list(self._contexts.items()):
+            if id(context) in closed:
+                continue
+            closed.add(id(context))
             try:
                 await context.close()
                 logger.debug("Closed context %r", name)
@@ -592,9 +620,9 @@ class CamoufoxDownloader:
         self._contexts.clear()
         self._page_semaphores.clear()
 
-        # Close browser if owned
+        # Close browser if owned — unless it was already closed as a context
         try:
-            if self._own_browser and self._browser is not None:
+            if self._own_browser and self._browser is not None and id(self._browser) not in closed:
                 await self._browser.close()
                 logger.debug("Camoufox browser closed")
         except Exception:
