@@ -122,7 +122,7 @@ class RobotsTxtMiddleware(DownloaderMiddleware):
             allowed = True
 
         if not allowed:
-            spider.crawler.stats.inc_counter("robotstxt/blocked")
+            spider.crawler.stats.inc("robotstxt/blocked")
 
             # Emit request_dropped via spider-bound dispatcher when available
             try:

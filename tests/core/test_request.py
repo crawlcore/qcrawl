@@ -1,5 +1,6 @@
 """Tests for qcrawl.core.request.Request"""
 
+import orjson
 import pytest
 
 from qcrawl.core.request import Request
@@ -143,3 +144,70 @@ def test_repr():
     assert "https://example.com" in r
     assert "priority=5" in r
     assert "depth=2" in r
+
+
+# Callback Tests
+
+
+def test_callback_callable_reduced_to_name():
+    """A callable callback is stored as its method name (kept serializable)."""
+
+    class S:
+        def parse_detail(self, response):
+            pass
+
+    req = Request(url="https://example.com", callback=S().parse_detail)
+
+    assert req.callback == "parse_detail"
+
+
+def test_callback_string_kept_as_is():
+    """A string callback name is stored unchanged."""
+    req = Request(url="https://example.com", callback="parse_detail")
+
+    assert req.callback == "parse_detail"
+
+
+def test_callback_lambda_rejected():
+    """A lambda callback is rejected (it cannot be re-resolved after serialization)."""
+    with pytest.raises(TypeError, match="named method"):
+        Request(url="https://example.com", callback=lambda r: r)
+
+
+def test_callback_and_cb_kwargs_round_trip_via_bytes():
+    """callback and cb_kwargs survive to_bytes/from_bytes."""
+    req = Request(url="https://example.com", callback="parse_detail", cb_kwargs={"page": 2})
+
+    restored = Request.from_bytes(req.to_bytes())
+
+    assert restored.callback == "parse_detail"
+    assert restored.cb_kwargs == {"page": 2}
+
+
+# JSON body convenience
+
+
+def test_json_sets_body_and_content_type():
+    """json= serializes to a bytes body and defaults Content-Type."""
+    req = Request(url="https://example.com", method="POST", json={"a": 1})
+
+    assert req.body == orjson.dumps({"a": 1})
+    assert req.headers["Content-Type"] == "application/json"
+
+
+def test_json_keeps_explicit_content_type():
+    """An explicit Content-Type is not overridden by json=."""
+    req = Request(
+        url="https://example.com",
+        method="POST",
+        json={"a": 1},
+        headers={"Content-Type": "application/vnd.api+json"},
+    )
+
+    assert req.headers["Content-Type"] == "application/vnd.api+json"
+
+
+def test_json_and_body_are_mutually_exclusive():
+    """Passing both json and body raises."""
+    with pytest.raises(TypeError, match="either body or json"):
+        Request(url="https://example.com", body=b"x", json={"a": 1})

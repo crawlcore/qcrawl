@@ -7,89 +7,125 @@ import pytest
 
 from qcrawl.core.stats import StatsCollector
 
+# Counter Tests
 
-def test_inc_value():
-    """StatsCollector inc_value increments counters."""
+
+def test_inc():
+    """StatsCollector.inc increments counters."""
     stats = StatsCollector()
 
-    stats.inc_value("requests")
-    stats.inc_value("requests")
-    stats.inc_value("responses", count=5)
+    stats.inc("requests")
+    stats.inc("requests")
+    stats.inc("responses", count=5)
 
-    assert stats.get_value("requests") == 2
-    assert stats.get_value("responses") == 5
+    assert stats.get("requests") == 2
+    assert stats.get("responses") == 5
 
 
-def test_inc_value_coerces_non_numeric():
-    """StatsCollector inc_value coerces non-numeric values to 0."""
+def test_inc_coerces_non_numeric():
+    """StatsCollector.inc coerces non-numeric values to 0 before incrementing."""
     stats = StatsCollector()
 
-    stats.set_meta("key", "string_value")
-    stats.inc_value("key")  # Should coerce to 0 then increment
+    stats.label("key", "string_value")
+    stats.inc("key")  # coerces to 0 then increments
 
-    assert stats.get_value("key") == 1
+    assert stats.get("key") == 1
 
 
-def test_set_counter():
-    """StatsCollector set_counter sets numeric values."""
+# Gauge Tests
+
+
+def test_set():
+    """StatsCollector.set sets numeric gauges."""
     stats = StatsCollector()
 
-    stats.set_counter("total", 100)
-    stats.set_counter("average", 42.5)
+    stats.set("total", 100)
+    stats.set("average", 42.5)
 
-    assert stats.get_value("total") == 100
-    assert stats.get_value("average") == 42.5
+    assert stats.get("total") == 100
+    assert stats.get("average") == 42.5
 
 
-def test_set_counter_rejects_non_numeric():
-    """StatsCollector set_counter raises TypeError for non-numeric values."""
+def test_set_rejects_non_numeric():
+    """StatsCollector.set raises TypeError for non-numeric values."""
     stats = StatsCollector()
 
-    with pytest.raises(TypeError, match="set_counter accepts only int or float"):
-        stats.set_counter("key", "string")  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="set accepts only int or float"):
+        stats.set("key", "string")  # type: ignore[arg-type]
 
 
-def test_set_meta():
-    """StatsCollector set_meta sets string metadata."""
+def test_max_keeps_high_water_mark():
+    """StatsCollector.max keeps the larger of the stored value and the new value."""
     stats = StatsCollector()
 
-    stats.set_meta("spider_name", "test_spider")
-    stats.set_meta("reason", "finished")
+    stats.max("peak", 5)
+    stats.max("peak", 12)
+    stats.max("peak", 9)
 
-    assert stats.get_value("spider_name") == "test_spider"
-    assert stats.get_value("reason") == "finished"
+    assert stats.get("peak") == 12
 
 
-def test_set_meta_rejects_non_string():
-    """StatsCollector set_meta raises TypeError for non-string values."""
+def test_min_keeps_low_water_mark():
+    """StatsCollector.min keeps the smaller of the stored value and the new value."""
     stats = StatsCollector()
 
-    with pytest.raises(TypeError, match="set_meta accepts only str"):
-        stats.set_meta("key", 123)  # type: ignore[arg-type]
+    stats.min("low", 5)
+    stats.min("low", 2)
+    stats.min("low", 9)
+
+    assert stats.get("low") == 2
 
 
-def test_get_value_with_default():
-    """StatsCollector get_value returns default for missing keys."""
+# Label Tests
+
+
+def test_label():
+    """StatsCollector.label sets string metadata."""
     stats = StatsCollector()
 
-    assert stats.get_value("missing") is None
-    assert stats.get_value("missing", default=0) == 0
+    stats.label("spider_name", "test_spider")
+    stats.label("reason", "finished")
+
+    assert stats.get("spider_name") == "test_spider"
+    assert stats.get("reason") == "finished"
 
 
-def test_get_stats():
-    """StatsCollector get_stats returns snapshot of all stats."""
+def test_label_rejects_non_string():
+    """StatsCollector.label raises TypeError for non-string values."""
     stats = StatsCollector()
 
-    stats.inc_value("requests", 10)
-    stats.set_meta("spider", "test")
+    with pytest.raises(TypeError, match="label accepts only str"):
+        stats.label("key", 123)  # type: ignore[arg-type]
 
-    snapshot = stats.get_stats()
+
+# Read Tests
+
+
+def test_get_with_default():
+    """StatsCollector.get returns the default for missing keys."""
+    stats = StatsCollector()
+
+    assert stats.get("missing") is None
+    assert stats.get("missing", default=0) == 0
+
+
+def test_snapshot():
+    """StatsCollector.snapshot returns a copy of all stats."""
+    stats = StatsCollector()
+
+    stats.inc("requests", 10)
+    stats.label("spider", "test")
+
+    snapshot = stats.snapshot()
     assert snapshot["requests"] == 10
     assert snapshot["spider"] == "test"
 
     # Snapshot is a copy
-    stats.inc_value("requests", 5)
+    stats.inc("requests", 5)
     assert snapshot["requests"] == 10  # Unchanged
+
+
+# Lifecycle Tests
 
 
 def test_open_spider():
@@ -100,8 +136,8 @@ def test_open_spider():
 
     stats.open_spider(spider)
 
-    assert stats.get_value("start_time") is not None
-    assert stats.get_value("spider_name") == "test_spider"
+    assert stats.get("start_time") is not None
+    assert stats.get("spider_name") == "test_spider"
     assert stats._start_time is not None
 
 
@@ -115,9 +151,9 @@ def test_close_spider():
     time.sleep(0.01)
     stats.close_spider(spider, reason="finished")
 
-    assert stats.get_value("finish_time") is not None
-    assert stats.get_value("finish_reason") == "finished"
-    elapsed = stats.get_value("elapsed_time_seconds")
+    assert stats.get("finish_time") is not None
+    assert stats.get("finish_reason") == "finished"
+    elapsed = stats.get("elapsed_time_seconds")
     assert isinstance(elapsed, (int, float)) and elapsed > 0
 
 
@@ -125,9 +161,9 @@ def test_log_stats():
     """StatsCollector log_stats formats stats for logging."""
     stats = StatsCollector()
 
-    stats.inc_value("requests", 1000)
-    stats.set_counter("average", 3.14159)
-    stats.set_meta("spider", "test")
+    stats.inc("requests", 1000)
+    stats.set("average", 3.14159)
+    stats.label("spider", "test")
 
     log_output = stats.log_stats()
 

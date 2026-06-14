@@ -144,7 +144,7 @@ class RedirectMiddleware(DownloaderMiddleware):
                 self.max_redirects,
             )
 
-            spider.crawler.stats.inc_counter("redirect/max_reached")
+            spider.crawler.stats.inc("redirect/max_reached")
 
             return MiddlewareResult.keep(response)
 

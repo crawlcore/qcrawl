@@ -153,8 +153,8 @@ class HttpProxyMiddleware(DownloaderMiddleware):
         request.meta["proxy"] = proxy_url
 
         # Stats: proxy used
-        spider.crawler.stats.inc_counter("proxy/requests")
-        spider.crawler.stats.inc_counter(f"proxy/requests/{scheme}")
+        spider.crawler.stats.inc("proxy/requests")
+        spider.crawler.stats.inc(f"proxy/requests/{scheme}")
 
         # Log safe proxy URL (hide credentials)
         try:
@@ -175,9 +175,9 @@ class HttpProxyMiddleware(DownloaderMiddleware):
     ) -> MiddlewareResult:
         if "proxy" in request.meta:
             if 200 <= response.status_code < 400:
-                spider.crawler.stats.inc_counter("proxy/success")
+                spider.crawler.stats.inc("proxy/success")
             else:
-                spider.crawler.stats.inc_counter("proxy/failure")
+                spider.crawler.stats.inc("proxy/failure")
 
         # No response-time proxy handling; continue processing
         return MiddlewareResult.continue_()
@@ -186,7 +186,7 @@ class HttpProxyMiddleware(DownloaderMiddleware):
         self, request: Request, exception: BaseException, spider: "Spider"
     ) -> MiddlewareResult:
         if "proxy" in request.meta:
-            spider.crawler.stats.inc_counter("proxy/errors")
+            spider.crawler.stats.inc("proxy/errors")
             try:
                 proxy = request.meta["proxy"]
                 if not isinstance(proxy, str):
@@ -196,7 +196,7 @@ class HttpProxyMiddleware(DownloaderMiddleware):
                     )
                 parsed = urlparse(proxy)
                 key = f"{parsed.hostname}:{parsed.port or 8080}"
-                spider.crawler.stats.inc_counter(f"proxy/errors/{key}")
+                spider.crawler.stats.inc(f"proxy/errors/{key}")
             except Exception:
                 pass
 

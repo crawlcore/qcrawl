@@ -144,6 +144,56 @@ def test_response_view_follow(dummy_spider):
     assert request.priority == 5
 
 
+def test_response_view_follow_with_headers(dummy_spider):
+    """ResponseView.follow() attaches custom headers to the Request."""
+    page = Page(
+        url="https://example.com/page1",
+        content=b"<html></html>",
+        status_code=200,
+        headers={},
+    )
+
+    view = ResponseView(page, dummy_spider)
+    request = view.follow("/page2", headers={"X-Token": "abc"})
+
+    assert request.url == "https://example.com/page2"
+    assert request.headers["X-Token"] == "abc"
+
+
+def test_response_view_follow_with_callback(dummy_spider):
+    """ResponseView.follow() sets the callback (by name) and cb_kwargs on the Request."""
+    page = Page(
+        url="https://example.com/page1",
+        content=b"<html></html>",
+        status_code=200,
+        headers={},
+    )
+
+    view = ResponseView(page, dummy_spider)
+    request = view.follow("/page2", callback="parse_detail", cb_kwargs={"page": 2})
+
+    assert request.callback == "parse_detail"
+    assert request.cb_kwargs == {"page": 2}
+
+
+def test_response_view_follow_with_json(dummy_spider):
+    """ResponseView.follow(json=...) sets a JSON body and Content-Type."""
+    import orjson
+
+    page = Page(
+        url="https://example.com/p",
+        content=b"",
+        status_code=200,
+        headers={},
+    )
+
+    view = ResponseView(page, dummy_spider)
+    request = view.follow("/api", json={"a": 1})
+
+    assert request.body == orjson.dumps({"a": 1})
+    assert request.headers["Content-Type"] == "application/json"
+
+
 def test_response_view_urljoin(dummy_spider):
     """ResponseView.urljoin() resolves relative URL."""
     page = Page(

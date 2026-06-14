@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 import inspect
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING
 
 import aiohttp
@@ -151,6 +151,7 @@ class CrawlEngine:
                 )
 
             await self.scheduler.join()
+            await self._drain_idle()
 
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug("Crawl finished for spider=%s", getattr(self.spider, "name", None))
@@ -375,11 +376,20 @@ class CrawlEngine:
             await self._handle_exception(request, exc)  # delegate to existing logic
             return
 
+        # Resolve the per-request callback (by name) on the spider, defaulting to
+        # `parse`. The callback was stored as a method name so the request stayed
+        # serializable across queue backends.
+        callback_name = request.callback if isinstance(request.callback, str) else "parse"
+        callback = getattr(self.spider, callback_name, None)
+        if not callable(callback):
+            callback = self.spider.parse
+        cb_kwargs = request.cb_kwargs or {}
+
         # Obtain spider parse async-iterator (support coroutine-returning implementations)
-        parse_result = self.spider.parse(response)
+        parse_result = callback(response, **cb_kwargs)
 
         # If parse() returns a coroutine, await it to get the async generator
-        parsed_ag: AsyncIterator[Item | str | Request]
+        parsed_ag: AsyncGenerator[Item | Request | str, None]
         if inspect.isawaitable(parse_result):
             parsed_ag = await parse_result
         else:
@@ -434,16 +444,17 @@ class CrawlEngine:
             if self._item_processor is not None:
                 try:
                     processed = await self._item_processor(item, self.spider)
-                except Exception:
-                    # A pipeline raised an unexpected error (a deliberate DropItem
-                    # returns None instead). Log it, drop this one item, and
-                    # continue — one item's pipeline bug must not abort the rest
-                    # of the parse output.
+                except Exception as item_exc:
+                    # A pipeline raised (a deliberate DropItem returns None instead).
+                    # Emit item_error — distinct from a deliberate item_dropped — and
+                    # continue; one item's pipeline bug must not abort the parse output.
                     logger.exception(
-                        "Pipeline error processing item from %s; dropping it",
+                        "Pipeline error processing item from %s",
                         getattr(self.spider, "name", None),
                     )
-                    await self.signals.send_async("item_dropped", item=item, spider=self.spider)
+                    await self.signals.send_async(
+                        "item_error", item=item, error=item_exc, spider=self.spider
+                    )
                     return
             if processed is None:
                 if logger.isEnabledFor(logging.DEBUG):
@@ -491,14 +502,32 @@ class CrawlEngine:
                     getattr(self.spider, "name", None),
                 )
 
+    async def _drain_idle(self) -> None:
+        """Fire `spider_idle` and re-drain until a round enqueues no new work.
+
+        Lets idle handlers feed the crawl in repeated waves: after each emit, if
+        the handler added requests, drain them and fire again; stop once a round
+        leaves the scheduler empty.
+        """
+        while True:
+            await self.signals.send_async("spider_idle", spider=self.spider)
+            if (await self.scheduler.qsize()) == 0:
+                break
+            await self.scheduler.join()
+
     async def _handle_exception(self, request: Request, exc: Exception) -> None:
-        """Handle exceptions raised while processing a request."""
+        """Handle exceptions raised while processing a request.
+
+        Emits `request_failed` once, when the request is abandoned because of an
+        error (non-retryable, retries exhausted, or unhandled) — NOT per attempt.
+        `request_dropped` is reserved for deliberate filtering / middleware DROP.
+        """
         is_network = isinstance(exc, (asyncio.TimeoutError, aiohttp.ClientError))
 
         if not is_network:
             exc_info = (type(exc), exc, getattr(exc, "__traceback__", None))
             logger.exception("Unhandled error for %s", request.url, exc_info=exc_info)
-            await self.signals.send_async("request_dropped", request=request, exception=exc)
+            await self.signals.send_async("request_failed", request=request, error=exc)
             return
 
         try:
@@ -512,12 +541,15 @@ class CrawlEngine:
                 request.url,
                 exc_info=exc_info,
             )
-            await self.signals.send_async("request_dropped", request=request, exception=exc)
+            await self.signals.send_async("request_failed", request=request, error=exc)
             return
 
-        if result.action in (Action.RETRY, Action.DROP):
+        if result.action is Action.RETRY:
+            # The request is rescheduled; it has not failed yet.
             await self._handle_retry_or_drop(result, request)
         else:
+            # DROP (retries exhausted) or unhandled: the errored request is
+            # abandoned -> request_failed (request_dropped is for filtering).
             logger.error("Network error for %s: %s", request.url, exc)
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug(
@@ -525,4 +557,4 @@ class CrawlEngine:
                     request.url,
                     exc_info=(type(exc), exc, getattr(exc, "__traceback__", None)),
                 )
-            await self.signals.send_async("request_dropped", request=request, exception=exc)
+            await self.signals.send_async("request_failed", request=request, error=exc)

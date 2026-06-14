@@ -39,7 +39,7 @@ def test_normalize_domain_empty():
 def test_get_allowed_domains_from_list(spider):
     """_get_allowed_domains reads list from spider."""
     middleware = OffsiteMiddleware()
-    spider.ALLOWED_DOMAINS = ["example.com", "other.com"]
+    spider.allowed_domains = ["example.com", "other.com"]
 
     allowed = middleware._get_allowed_domains(spider)
 
@@ -49,7 +49,7 @@ def test_get_allowed_domains_from_list(spider):
 def test_get_allowed_domains_from_string(spider):
     """_get_allowed_domains handles single domain string."""
     middleware = OffsiteMiddleware()
-    spider.ALLOWED_DOMAINS = "example.com"
+    spider.allowed_domains = "example.com"
 
     allowed = middleware._get_allowed_domains(spider)
 
@@ -74,6 +74,25 @@ def test_get_allowed_domains_no_config(spider):
     allowed = middleware._get_allowed_domains(spider)
 
     assert allowed is None
+
+
+def test_get_allowed_domains_empty_collection_allows_all(spider):
+    """An empty allowed_domains collection means 'allow all' (None), not 'block all'."""
+    middleware = OffsiteMiddleware()
+    spider.allowed_domains = []
+
+    allowed = middleware._get_allowed_domains(spider)
+
+    assert allowed is None
+
+
+def test_get_allowed_domains_rejects_invalid_type(spider):
+    """A non-str / non-collection allowed_domains raises a clear TypeError."""
+    middleware = OffsiteMiddleware()
+    spider.allowed_domains = 123
+
+    with pytest.raises(TypeError, match="allowed_domains must be a str or a collection of str"):
+        middleware._get_allowed_domains(spider)
 
 
 def test_extract_domain():
@@ -200,7 +219,7 @@ async def test_process_spider_output_no_filtering_when_no_allowed_domains(spider
 async def test_process_spider_output_allows_onsite_request(spider):
     """process_spider_output allows requests to allowed domain."""
     middleware = OffsiteMiddleware()
-    spider.ALLOWED_DOMAINS = ["example.com"]
+    spider.allowed_domains = ["example.com"]
     parent_request = Request(url="https://example.com/parent")
     response = Page(
         url="https://example.com/parent",
@@ -224,7 +243,7 @@ async def test_process_spider_output_allows_onsite_request(spider):
 async def test_process_spider_output_filters_offsite_request(spider):
     """process_spider_output filters requests to other domains."""
     middleware = OffsiteMiddleware()
-    spider.ALLOWED_DOMAINS = ["example.com"]
+    spider.allowed_domains = ["example.com"]
     parent_request = Request(url="https://example.com/parent")
     response = Page(
         url="https://example.com/parent",
@@ -249,7 +268,7 @@ async def test_process_spider_output_filters_offsite_request(spider):
 async def test_process_spider_output_allows_subdomain(spider):
     """process_spider_output allows subdomains."""
     middleware = OffsiteMiddleware()
-    spider.ALLOWED_DOMAINS = ["example.com"]
+    spider.allowed_domains = ["example.com"]
     parent_request = Request(url="https://example.com/parent")
     response = Page(
         url="https://example.com/parent",
@@ -276,7 +295,7 @@ async def test_process_spider_output_allows_subdomain(spider):
 async def test_process_spider_output_converts_onsite_strings(spider):
     """process_spider_output converts onsite string URLs to Request."""
     middleware = OffsiteMiddleware()
-    spider.ALLOWED_DOMAINS = ["example.com"]
+    spider.allowed_domains = ["example.com"]
     parent_request = Request(url="https://example.com/parent", meta={"depth": 1})
     response = Page(
         url="https://example.com/parent",
@@ -303,7 +322,7 @@ async def test_process_spider_output_converts_onsite_strings(spider):
 async def test_process_spider_output_filters_offsite_strings(spider):
     """process_spider_output filters offsite string URLs."""
     middleware = OffsiteMiddleware()
-    spider.ALLOWED_DOMAINS = ["example.com"]
+    spider.allowed_domains = ["example.com"]
     parent_request = Request(url="https://example.com/parent")
     response = Page(
         url="https://example.com/parent",
@@ -334,7 +353,7 @@ async def test_open_spider_logs_allowed_domains(spider, caplog):
 
     caplog.set_level(logging.INFO)
     middleware = OffsiteMiddleware()
-    spider.ALLOWED_DOMAINS = ["example.com", "other.com"]
+    spider.allowed_domains = ["example.com", "other.com"]
 
     await middleware.open_spider(spider)
 
@@ -363,7 +382,7 @@ async def test_open_spider_logs_all_domains_allowed(spider, caplog):
 async def test_close_spider_records_stats(spider):
     """close_spider records dropped count in stats."""
     middleware = OffsiteMiddleware()
-    spider.ALLOWED_DOMAINS = ["example.com"]
+    spider.allowed_domains = ["example.com"]
     parent_request = Request(url="https://example.com/parent")
     response = Page(
         url="https://example.com/parent",
@@ -395,7 +414,7 @@ async def test_close_spider_records_stats(spider):
 async def test_mixed_onsite_offsite_requests(spider):
     """Correctly handles mix of onsite and offsite requests."""
     middleware = OffsiteMiddleware()
-    spider.ALLOWED_DOMAINS = ["example.com"]
+    spider.allowed_domains = ["example.com"]
     parent_request = Request(url="https://example.com/parent")
     response = Page(
         url="https://example.com/parent",
@@ -427,7 +446,7 @@ async def test_mixed_onsite_offsite_requests(spider):
 async def test_multiple_allowed_domains(spider):
     """Works correctly with multiple allowed domains."""
     middleware = OffsiteMiddleware()
-    spider.ALLOWED_DOMAINS = ["example.com", "partner.org"]
+    spider.allowed_domains = ["example.com", "partner.org"]
     parent_request = Request(url="https://example.com/parent")
     response = Page(
         url="https://example.com/parent",
@@ -454,7 +473,7 @@ async def test_multiple_allowed_domains(spider):
 async def test_process_spider_output_filters_parent_when_only_subdomain_allowed(spider):
     """Only the allowed subdomain passes; parent and sibling domains are filtered."""
     middleware = OffsiteMiddleware()
-    spider.ALLOWED_DOMAINS = ["api.example.com"]
+    spider.allowed_domains = ["api.example.com"]
     parent_request = Request(url="https://api.example.com/parent")
     response = Page(
         url="https://api.example.com/parent",

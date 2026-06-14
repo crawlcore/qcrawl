@@ -428,7 +428,18 @@ class Crawler:
             self.runtime_settings = final_settings
 
             # Create core components using finalized settings
-            fingerprinter = RequestFingerprinter()
+            fingerprinter = RequestFingerprinter(
+                ignore_query_params=(
+                    set(final_settings.IGNORE_QUERY_PARAMS)
+                    if final_settings.IGNORE_QUERY_PARAMS
+                    else None
+                ),
+                keep_query_params=(
+                    set(final_settings.KEEP_QUERY_PARAMS)
+                    if final_settings.KEEP_QUERY_PARAMS
+                    else None
+                ),
+            )
 
             # Create download handler manager
             self.handler_manager = DownloadHandlerManager(
@@ -550,25 +561,29 @@ class Crawler:
 
         async def on_item_scraped(sender, item, spider=None, **kwargs):
             spider = spider or sender
-            self.stats.inc_value("pipeline/item_scraped_count")
+            self.stats.inc("pipeline/item_scraped_count")
 
         async def on_item_dropped(sender, item=None, spider=None, **kwargs):
             spider = spider or sender
-            self.stats.inc_value("pipeline/item_dropped_count")
+            self.stats.inc("pipeline/item_dropped_count")
+
+        async def on_item_error(sender, item=None, error=None, spider=None, **kwargs):
+            spider = spider or sender
+            self.stats.inc("pipeline/item_error_count")
 
         async def on_request_scheduled(sender, request, spider=None, **kwargs):
             spider = spider or sender
-            self.stats.inc_value("scheduler/request_scheduled_count")
+            self.stats.inc("scheduler/request_scheduled_count")
 
         async def on_request_reached_downloader(sender, request, spider=None, **kwargs):
             spider = spider or sender
-            self.stats.inc_value("downloader/request_downloaded_count")
+            self.stats.inc("downloader/request_downloaded_count")
 
         async def on_response_received(sender, response, request, spider=None, **kwargs):
             try:
                 spider = spider or sender
-                self.stats.inc_value("downloader/response_status_count")
-                self.stats.inc_value(
+                self.stats.inc("downloader/response_status_count")
+                self.stats.inc(
                     f"downloader/response_status_{int(getattr(response, 'status_code', 0))}"
                 )
             except Exception:
@@ -576,12 +591,12 @@ class Crawler:
 
         async def on_request_dropped(sender, request, exception, spider=None, **kwargs):
             spider = spider or sender
-            self.stats.inc_value("scheduler/dequeued")
-            self.stats.inc_value("engine/error_count")
+            self.stats.inc("scheduler/dequeued")
+            self.stats.inc("engine/error_count")
 
         async def on_bytes_received(sender, data, request, **kwargs):
             try:
-                self.stats.inc_value(
+                self.stats.inc(
                     "downloader/bytes_downloaded", count=len(data) if data is not None else 0
                 )
             except Exception:
@@ -601,6 +616,7 @@ class Crawler:
         _try_connect("spider_closed", on_spider_closed)
         _try_connect("item_scraped", on_item_scraped)
         _try_connect("item_dropped", on_item_dropped)
+        _try_connect("item_error", on_item_error)
         _try_connect("request_scheduled", on_request_scheduled)
         _try_connect("request_reached_downloader", on_request_reached_downloader)
         _try_connect("response_received", on_response_received)

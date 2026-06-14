@@ -42,6 +42,34 @@ def test_middleware_init_custom():
     assert middleware.backoff_jitter == 0.5
 
 
+def test_from_crawler_reads_retry_settings():
+    """from_crawler reads MAX_RETRIES and the RETRY_* settings from the crawler."""
+    from types import SimpleNamespace
+
+    from qcrawl.settings import Settings
+
+    crawler = SimpleNamespace(
+        runtime_settings=Settings(
+            MAX_RETRIES=7,
+            RETRY_HTTP_CODES=[500, 503],
+            RETRY_PRIORITY_ADJUST=-3,
+            RETRY_BACKOFF_BASE=2.0,
+            RETRY_BACKOFF_MAX=120.0,
+            RETRY_BACKOFF_JITTER=0.5,
+            RETRY_ENABLED=False,
+        )
+    )
+    middleware = RetryMiddleware.from_crawler(crawler)
+
+    assert middleware.max_retries == 7
+    assert middleware.retry_http_codes == {500, 503}
+    assert middleware.priority_adjust == -3
+    assert middleware.backoff_base == 2.0
+    assert middleware.backoff_max == 120.0
+    assert middleware.backoff_jitter == 0.5
+    assert middleware._enabled is False
+
+
 # Delay Computation Tests
 
 
@@ -198,6 +226,31 @@ async def test_process_exception_drops_after_max_retries(spider):
 
 
 @pytest.mark.asyncio
+async def test_retry_records_stats_with_real_collector(spider):
+    """A retry records its stats through a real StatsCollector without raising.
+
+    Regression: the middleware called stats.inc_counter(), a method StatsCollector
+    does not define, so any retry raised AttributeError. The test suite mocked
+    crawler.stats, which hid it — so this uses a real collector. The same fix
+    covers redirect/robotstxt/cookies/httpproxy, which had the same call.
+    """
+    from qcrawl.core.stats import StatsCollector
+
+    stats = StatsCollector()
+    spider.crawler.stats = stats
+    middleware = RetryMiddleware(max_retries=3)
+    request = Request(url="https://example.com/page")
+
+    result = await middleware.process_exception(
+        request, aiohttp.ClientError("Connection failed"), spider
+    )
+
+    assert result.action == Action.RETRY
+    assert stats.get("downloader/retry/total") == 1
+    assert stats.get("downloader/retry/network_error") == 1
+
+
+@pytest.mark.asyncio
 async def test_process_exception_continues_for_non_transient(spider):
     """process_exception continues for non-transient exceptions."""
     middleware = RetryMiddleware()
@@ -249,6 +302,64 @@ async def test_process_response_retries_500(spider):
     assert result.action == Action.RETRY
     retry_request = result.payload
     assert retry_request.meta["retry_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_disabled_retry_passes_response_through(spider):
+    """When RETRY_ENABLED is False, a retryable status is not retried."""
+    middleware = RetryMiddleware(enabled=False)
+    request = Request(url="https://example.com/page")
+    response = Page(
+        url="https://example.com/page",
+        content=b"error",
+        status_code=503,
+        headers={},
+        request=request,
+    )
+
+    result = await middleware.process_response(request, response, spider)
+
+    assert result.action == Action.KEEP
+
+
+@pytest.mark.asyncio
+async def test_dont_retry_meta_skips_retry(spider):
+    """A request with meta['dont_retry'] is not retried on a retryable status."""
+    middleware = RetryMiddleware()
+    request = Request(url="https://example.com/page", meta={"dont_retry": True})
+    response = Page(
+        url="https://example.com/page",
+        content=b"error",
+        status_code=503,
+        headers={},
+        request=request,
+    )
+
+    result = await middleware.process_response(request, response, spider)
+
+    assert result.action == Action.KEEP
+
+
+@pytest.mark.asyncio
+async def test_max_retry_times_meta_overrides_max_retries(spider):
+    """meta['max_retry_times'] caps retries below the configured max_retries."""
+    middleware = RetryMiddleware(max_retries=5)
+    # Already retried once; per-request cap of 1 means no further retry.
+    request = Request(
+        url="https://example.com/page",
+        meta={"max_retry_times": 1, "retry_count": 1},
+    )
+    response = Page(
+        url="https://example.com/page",
+        content=b"error",
+        status_code=503,
+        headers={},
+        request=request,
+    )
+
+    result = await middleware.process_response(request, response, spider)
+
+    assert result.action == Action.KEEP
 
 
 @pytest.mark.asyncio

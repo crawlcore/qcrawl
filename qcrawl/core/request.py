@@ -1,5 +1,8 @@
 import logging
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import InitVar, dataclass, field
+
+import orjson
 
 from qcrawl.core._msgspec import encode_request
 from qcrawl.utils.url import normalize_url
@@ -37,14 +40,36 @@ class Request:
     timeout_ms: int = 10000
     proxy: str | None = None
     ts: int = 0
+    # Spider method to handle the response, by name (defaults to `parse`). A
+    # callable is accepted and reduced to its `__name__` so requests stay
+    # serializable; the engine re-resolves it on the spider at dispatch.
+    callback: Callable[..., object] | str | None = None
+    # Extra keyword arguments passed to the callback.
+    cb_kwargs: dict[str, object] = field(default_factory=dict)
+    # Init-only convenience: a JSON-serializable value becomes a JSON body.
+    json: InitVar[object | None] = None
 
-    def __post_init__(self) -> None:
+    def __post_init__(self, json: object | None) -> None:
         # Normalize URL (defensive)
         try:
             self.url = normalize_url(self.url)
         except Exception as exc:
             logger.debug("normalize_url failed for %s: %s", self.url, exc, exc_info=True)
             self.meta.setdefault("url_normalize_error", str(exc))
+
+        # JSON convenience: serialize to a bytes body and default the content type.
+        if json is not None:
+            if self.body is not None:
+                raise TypeError("Request: pass either body or json, not both")
+            self.body = orjson.dumps(json)
+            self.headers.setdefault("Content-Type", "application/json")
+
+        # Reduce a callable callback to its method name (keeps requests serializable).
+        if self.callback is not None and not isinstance(self.callback, str):
+            name = getattr(self.callback, "__name__", None)
+            if not name or name == "<lambda>":
+                raise TypeError("Request.callback must be a named method or a method-name string")
+            self.callback = name
 
         if self.body is None:
             return
@@ -64,6 +89,8 @@ class Request:
             "headers": dict(self.headers) if self.headers else {},
             "meta": dict(self.meta) if self.meta else {},
             "method": self.method,
+            "callback": self.callback if isinstance(self.callback, str) else None,
+            "cb_kwargs": dict(self.cb_kwargs) if self.cb_kwargs else {},
             # Intentionally exclude `body` for readability in debug dumps
         }
 
@@ -151,8 +178,23 @@ class Request:
             else:
                 raise TypeError("Request.from_dict: 'body' must be bytes when present")
 
+        callback_raw = data.get("callback")
+        callback = callback_raw if isinstance(callback_raw, str) else None
+
+        cb_kwargs_raw = data.get("cb_kwargs", {}) or {}
+        if not isinstance(cb_kwargs_raw, dict):
+            raise TypeError("Request.from_dict: 'cb_kwargs' must be a dict")
+        cb_kwargs = dict(cb_kwargs_raw)
+
         return cls(
-            url=url, meta=meta, headers=headers, priority=priority, method=method, body=body_bytes
+            url=url,
+            meta=meta,
+            headers=headers,
+            priority=priority,
+            method=method,
+            body=body_bytes,
+            callback=callback,
+            cb_kwargs=cb_kwargs,
         )
 
     def copy(self, *, url: str | None = None) -> "Request":
@@ -168,6 +210,8 @@ class Request:
             priority=int(self.priority),
             method=str(self.method),
             body=self.body,
+            callback=self.callback if isinstance(self.callback, str) else None,
+            cb_kwargs=dict(self.cb_kwargs) if self.cb_kwargs else {},
         )
 
     def __repr__(self) -> str:

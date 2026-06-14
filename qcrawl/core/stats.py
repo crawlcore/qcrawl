@@ -8,7 +8,17 @@ logger = logging.getLogger(__name__)
 
 
 class StatsCollector:
-    """Thread-safe, synchronous statistics collector."""
+    """Thread-safe, synchronous statistics collector.
+
+    A single flat, slash-namespaced key store with intent-revealing operations
+    so the right call is always obvious:
+
+      - `inc(key, count=1)` for monotonic counters (requests, retries, items),
+      - `set(key, value)` / `max(key, value)` / `min(key, value)` for gauges
+        (current levels and high/low-water marks),
+      - `label(key, text)` for string metadata (spider name, finish reason),
+      - `get(key, default)` / `snapshot()` to read.
+    """
 
     def __init__(self) -> None:
         self._stats: dict[str, int | float | str] = defaultdict(int)
@@ -16,37 +26,61 @@ class StatsCollector:
         self._start_time: datetime | None = None
         self._finish_time: datetime | None = None
 
-    def inc_value(self, key: str, count: int = 1) -> None:
-        """Increment counter (thread-safe). Coerces non-numeric to 0."""
+    # Counters
+
+    def inc(self, key: str, count: int = 1) -> None:
+        """Increment a counter by `count` (thread-safe; non-numeric resets to 0)."""
         with self._lock:
             current = self._stats[key]
             if not isinstance(current, (int, float)):
                 current = 0
             self._stats[key] = current + count
 
-    def set_counter(self, key: str, value: int | float) -> None:
-        """Set a numeric counter (thread-safe)."""
+    # Gauges
+
+    def set(self, key: str, value: int | float) -> None:
+        """Set a numeric gauge (thread-safe)."""
         if not isinstance(value, (int, float)):
-            raise TypeError("set_counter accepts only int or float")
+            raise TypeError("set accepts only int or float")
         with self._lock:
             self._stats[key] = value
 
-    def set_meta(self, key: str, value: str) -> None:
+    def max(self, key: str, value: int | float) -> None:
+        """Record a high-water mark: keep the larger of the stored value and `value`."""
+        if not isinstance(value, (int, float)):
+            raise TypeError("max accepts only int or float")
+        with self._lock:
+            current = self._stats.get(key)
+            if not isinstance(current, (int, float)) or value > current:
+                self._stats[key] = value
+
+    def min(self, key: str, value: int | float) -> None:
+        """Record a low-water mark: keep the smaller of the stored value and `value`."""
+        if not isinstance(value, (int, float)):
+            raise TypeError("min accepts only int or float")
+        with self._lock:
+            current = self._stats.get(key)
+            if not isinstance(current, (int, float)) or value < current:
+                self._stats[key] = value
+
+    # Labels / metadata
+
+    def label(self, key: str, text: str) -> None:
         """Set string metadata (thread-safe)."""
-        if not isinstance(value, str):
-            raise TypeError("set_meta accepts only str")
+        if not isinstance(text, str):
+            raise TypeError("label accepts only str")
         with self._lock:
-            self._stats[key] = value
+            self._stats[key] = text
 
-    def get_value(
-        self, key: str, default: int | float | str | None = None
-    ) -> int | float | str | None:
-        """Get value (thread-safe)."""
+    # Reads
+
+    def get(self, key: str, default: int | float | str | None = None) -> int | float | str | None:
+        """Get a value (thread-safe)."""
         with self._lock:
             return self._stats.get(key, default)
 
-    def get_stats(self) -> dict[str, int | float | str]:
-        """Get all stats (snapshot)."""
+    def snapshot(self) -> dict[str, int | float | str]:
+        """Return a copy of all stats."""
         with self._lock:
             return self._stats.copy()
 
@@ -55,24 +89,24 @@ class StatsCollector:
         start = datetime.now()
         with self._lock:
             self._start_time = start
-            self.set_meta("start_time", self._start_time.isoformat())
-            self.set_meta("spider_name", getattr(spider, "name", "unknown"))
+            self.label("start_time", self._start_time.isoformat())
+            self.label("spider_name", getattr(spider, "name", "unknown"))
 
     def close_spider(self, spider, reason: str = "finished") -> None:
         """Called when spider closes."""
         finish = datetime.now()
         with self._lock:
             self._finish_time = finish
-            self.set_meta("finish_time", self._finish_time.isoformat())
-            self.set_meta("finish_reason", reason)
+            self.label("finish_time", self._finish_time.isoformat())
+            self.label("finish_reason", reason)
 
             if self._start_time:
                 elapsed = (self._finish_time - self._start_time).total_seconds()
-                self.set_counter("elapsed_time_seconds", elapsed)
+                self.set("elapsed_time_seconds", elapsed)
 
     def log_stats(self) -> str:
         """Log collected stats in pretty format."""
-        stats = self.get_stats()
+        stats = self.snapshot()
         lines = []
         for key in sorted(stats):
             value = stats[key]

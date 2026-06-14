@@ -22,11 +22,20 @@ class CookiesMiddleware(DownloaderMiddleware):
       so runs are deterministic and do not leak state across spiders.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, enabled: bool = True) -> None:
+        self._enabled = bool(enabled)
         # cookies[spider_id][domain] = SimpleCookie
         self._cookies: dict[object, dict[str, SimpleCookie]] = defaultdict(
             lambda: defaultdict(SimpleCookie)
         )
+
+    @classmethod
+    def from_crawler(cls, crawler):
+        """Create from crawler, reading the `COOKIES_ENABLED` setting."""
+        from qcrawl.settings import Settings
+
+        settings: Settings = getattr(crawler, "runtime_settings", None) or Settings()
+        return cls(enabled=settings.COOKIES_ENABLED)
 
     def _get_domain(self, url: str) -> str:
         """Extract domain from URL using canonical helper."""
@@ -38,6 +47,9 @@ class CookiesMiddleware(DownloaderMiddleware):
 
     async def process_request(self, request: "Request", spider: "Spider") -> MiddlewareResult:
         """Add cookies to outgoing request."""
+        if not self._enabled:
+            return MiddlewareResult.continue_()
+
         spider_id = self._get_spider_id(spider)
         domain = self._get_domain(request.url)
 
@@ -63,6 +75,9 @@ class CookiesMiddleware(DownloaderMiddleware):
         self, request: "Request", response: "Page", spider: "Spider"
     ) -> MiddlewareResult:
         """Extract Set-Cookie from response."""
+        if not self._enabled:
+            return MiddlewareResult.keep(response)
+
         spider_id = self._get_spider_id(spider)
         domain = self._get_domain(request.url)
 
@@ -84,7 +99,7 @@ class CookiesMiddleware(DownloaderMiddleware):
                     logger.debug("Stored cookie from %s: %s", domain, header)
 
             except Exception as exc:
-                spider.crawler.stats.inc_counter("cookies/errors")
+                spider.crawler.stats.inc("cookies/errors")
                 logger.warning(
                     "Failed to parse Set-Cookie header %r for %s: %s", header, request.url, exc
                 )

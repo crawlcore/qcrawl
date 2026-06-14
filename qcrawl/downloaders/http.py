@@ -282,6 +282,17 @@ class HTTPDownloader:
                 async with self._session.request(
                     request.method, request.url, headers=final_headers, data=request.body
                 ) as resp:
+                    # Headers are available before the body is read — emit
+                    # headers_received here so handlers can act pre-body.
+                    try:
+                        await self.signals.send_async(
+                            "headers_received",
+                            headers=dict(resp.headers),
+                            request=request,
+                        )
+                    except Exception:
+                        logger.exception("Error dispatching headers_received for %s", request.url)
+
                     page = await Page.from_response(resp, request=request)
                     try:
                         await self.signals.send_async(

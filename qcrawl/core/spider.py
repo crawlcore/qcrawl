@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import contextlib
 from abc import ABC, abstractmethod
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 
 import yarl
 from lxml import html
@@ -78,10 +78,26 @@ class Spider(ABC):
         return ResponseView(response, spider=self)
 
     def follow(
-        self, response: Page, href: str, priority: int = 0, meta: dict[str, object] | None = None
+        self,
+        response: Page,
+        href: str,
+        priority: int = 0,
+        meta: dict[str, object] | None = None,
+        headers: dict[str, str] | None = None,
+        callback: Callable[..., object] | str | None = None,
+        cb_kwargs: dict[str, object] | None = None,
+        json: object | None = None,
     ) -> Request:
         """Convenience wrapper to create a Request resolved against `response` using spider defaults."""
-        return self.response_view(response).follow(href, priority=priority, meta=meta)
+        return self.response_view(response).follow(
+            href,
+            priority=priority,
+            meta=meta,
+            headers=headers,
+            callback=callback,
+            cb_kwargs=cb_kwargs,
+            json=json,
+        )
 
 
 class ResponseView:
@@ -103,7 +119,14 @@ class ResponseView:
         return self._doc
 
     def follow(
-        self, href: str, priority: int = 0, meta: dict[str, object] | None = None
+        self,
+        href: str,
+        priority: int = 0,
+        meta: dict[str, object] | None = None,
+        headers: dict[str, str] | None = None,
+        callback: Callable[..., object] | str | None = None,
+        cb_kwargs: dict[str, object] | None = None,
+        json: object | None = None,
     ) -> Request:
         """Resolve URL and create Request (no parsing needed)."""
         try:
@@ -119,6 +142,10 @@ class ResponseView:
             url=abs_url,
             priority=priority,
             meta=dict(meta) if meta is not None else {},
+            headers=dict(headers) if headers else {},
+            callback=callback,
+            cb_kwargs=dict(cb_kwargs) if cb_kwargs else {},
+            json=json,
         )
 
     def urljoin(self, url: str) -> str:

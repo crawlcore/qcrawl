@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import random
 import time
 from typing import TYPE_CHECKING
 
@@ -18,13 +19,14 @@ class DownloadDelayMiddleware(DownloaderMiddleware):
 
     Arguments:
         delay_per_domain: minimum seconds between requests to same domain
+        randomize: when true, jitter the per-domain delay to 50-150% each request
 
     Notes:
       - Honors per-request `request.meta['retry_delay']` when present.
       - Records last-download timestamp on response/exception.
     """
 
-    def __init__(self, delay_per_domain: float = 0.25) -> None:
+    def __init__(self, delay_per_domain: float = 0.25, randomize: bool = False) -> None:
         try:
             d = float(delay_per_domain)
         except Exception:
@@ -32,8 +34,17 @@ class DownloadDelayMiddleware(DownloaderMiddleware):
         if d < 0:
             raise ValueError("delay_per_domain must be >= 0")
         self._delay = d
+        self._randomize = bool(randomize)
         self._last: dict[str, float] = {}
         self._locks: dict[str, asyncio.Lock] = {}
+
+    @classmethod
+    def from_crawler(cls, crawler):
+        """Create from crawler, reading the `DELAY_PER_DOMAIN` and `RANDOMIZE_DELAY` settings."""
+        from qcrawl.settings import Settings
+
+        settings: Settings = getattr(crawler, "runtime_settings", None) or Settings()
+        return cls(delay_per_domain=settings.DELAY_PER_DOMAIN, randomize=settings.RANDOMIZE_DELAY)
 
     def _domain_key(self, url: str) -> str:
         try:
@@ -60,7 +71,11 @@ class DownloadDelayMiddleware(DownloaderMiddleware):
         except Exception:
             request_delay = 0.0
 
-        effective = max(self._delay, request_delay or 0.0)
+        base_delay = self._delay
+        if self._randomize and base_delay > 0:
+            base_delay *= random.uniform(0.5, 1.5)
+
+        effective = max(base_delay, request_delay or 0.0)
         if effective > 0:
             key = self._domain_key(request.url)
             lock = self._get_lock(key)

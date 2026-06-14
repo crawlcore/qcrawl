@@ -18,7 +18,8 @@ class DepthMiddleware(SpiderMiddleware):
     """Limit crawl depth to prevent infinite recursion.
 
     Features:
-    - Configurable max depth per spider (uses `spider.max_depth`)
+    - Max depth from the `MAX_DEPTH` setting (0 = unlimited); a per-spider
+      `max_depth` attribute overrides it
     - Optional depth priority adjustment via `spider.depth_priority` or `spider.DEPTH_PRIORITY`
     - Automatic depth tracking in request.meta
     - Clones and adjusts Request objects safely via Request.copy()
@@ -30,6 +31,19 @@ class DepthMiddleware(SpiderMiddleware):
         self.default_max_depth = default_max_depth
         self.default_priority = default_priority
         self._depth_stats: dict[int, int] = {}
+
+    @classmethod
+    def from_crawler(cls, crawler):
+        """Create from crawler, reading the `MAX_DEPTH` setting (0 = unlimited).
+
+        `Settings` validates `MAX_DEPTH` (int, >= 0), so the value is trusted here.
+        A spider can still override per-instance with a `max_depth` attribute
+        (see `_get_max_depth`).
+        """
+        from qcrawl.settings import Settings
+
+        settings: Settings = getattr(crawler, "runtime_settings", None) or Settings()
+        return cls(default_max_depth=settings.MAX_DEPTH)
 
     def _get_max_depth(self, spider: "Spider") -> int:
         """Return configured max depth for the spider (0 = unlimited)."""
@@ -158,5 +172,5 @@ class DepthMiddleware(SpiderMiddleware):
             return
 
         max_depth_reached = max(self._depth_stats.keys()) if self._depth_stats else 0
-        spider.crawler.stats.set_counter("depth/max", max_depth_reached)
-        spider.crawler.stats.set_meta("depth/distribution", str(dict(self._depth_stats)))
+        spider.crawler.stats.set("depth/max", max_depth_reached)
+        spider.crawler.stats.label("depth/distribution", str(dict(self._depth_stats)))

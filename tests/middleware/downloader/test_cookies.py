@@ -17,6 +17,45 @@ def test_middleware_init():
     assert middleware._cookies == {}
 
 
+def test_from_crawler_reads_cookies_enabled():
+    """from_crawler reads COOKIES_ENABLED from the crawler settings."""
+    from types import SimpleNamespace
+
+    from qcrawl.settings import Settings
+
+    crawler = SimpleNamespace(runtime_settings=Settings(COOKIES_ENABLED=False))
+    middleware = CookiesMiddleware.from_crawler(crawler)
+
+    assert middleware._enabled is False
+
+
+@pytest.mark.asyncio
+async def test_disabled_cookies_does_not_add_or_store(spider):
+    """When disabled, CookiesMiddleware neither sends stored cookies nor stores new ones."""
+    from http.cookies import SimpleCookie
+
+    middleware = CookiesMiddleware(enabled=False)
+    spider_id = middleware._get_spider_id(spider)
+    seeded = SimpleCookie()
+    seeded["session_id"] = "abc123"
+    middleware._cookies[spider_id]["example.com"] = seeded
+
+    request = Request(url="https://example.com/page")
+    result = await middleware.process_request(request, spider)
+    assert result.action == Action.CONTINUE
+    assert "Cookie" not in request.headers  # not added despite the stored cookie
+
+    response = Page(
+        url="https://example.com/page",
+        content=b"",
+        status_code=200,
+        headers={"Set-Cookie": "new=1"},
+        request=request,
+    )
+    await middleware.process_response(request, response, spider)
+    assert "new" not in middleware._cookies[spider_id]["example.com"]  # Set-Cookie ignored
+
+
 # Helper Method Tests
 
 

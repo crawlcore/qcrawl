@@ -49,6 +49,40 @@ def test_middleware_init_negative_delay():
         DownloadDelayMiddleware(delay_per_domain=-1.0)
 
 
+def test_from_crawler_reads_delay_and_randomize_settings():
+    """from_crawler reads DELAY_PER_DOMAIN and RANDOMIZE_DELAY from the crawler settings."""
+    from types import SimpleNamespace
+
+    from qcrawl.settings import Settings
+
+    crawler = SimpleNamespace(runtime_settings=Settings(DELAY_PER_DOMAIN=2.0, RANDOMIZE_DELAY=True))
+    middleware = DownloadDelayMiddleware.from_crawler(crawler)
+
+    assert middleware._delay == 2.0
+    assert middleware._randomize is True
+
+
+@pytest.mark.asyncio
+async def test_randomize_applies_jitter_to_delay(spider, monkeypatch):
+    """With randomize on, the per-domain delay is scaled by random.uniform(0.5, 1.5)."""
+    captured = {}
+
+    def fake_uniform(lo, hi):
+        captured["band"] = (lo, hi)
+        return 0.5  # lower bound keeps the test fast
+
+    monkeypatch.setattr("qcrawl.middleware.downloader.download_delay.random.uniform", fake_uniform)
+    middleware = DownloadDelayMiddleware(delay_per_domain=0.2, randomize=True)
+    middleware._last["example.com"] = time.monotonic()
+
+    start = time.monotonic()
+    await middleware.process_request(Request(url="https://example.com/b"), spider)
+    waited = time.monotonic() - start
+
+    assert captured["band"] == (0.5, 1.5)
+    assert waited >= 0.08  # ~0.5 * 0.2 = 0.1s jittered wait
+
+
 # Domain Key Tests
 
 

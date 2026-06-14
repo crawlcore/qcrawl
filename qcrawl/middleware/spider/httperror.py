@@ -115,4 +115,4 @@ class HttpErrorMiddleware(SpiderMiddleware):
     async def close_spider(self, spider: "Spider") -> None:
         """Log statistics when spider closes (lifecycle hook)."""
         if self._filtered_count > 0:
-            spider.crawler.stats.set_counter("httperror/filtered", self._filtered_count)
+            spider.crawler.stats.set("httperror/filtered", self._filtered_count)

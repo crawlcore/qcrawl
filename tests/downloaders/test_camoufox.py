@@ -22,6 +22,7 @@ def mock_page():
     page.close = AsyncMock()
     page.set_default_timeout = Mock()
     page.on = Mock()
+    page.route = AsyncMock()
     return page
 
 
@@ -262,6 +263,90 @@ async def test_fetch_basic_request(camoufox_downloader, mock_context, mock_page)
     mock_context.new_page.assert_called_once()
     mock_page.goto.assert_called_once()
     mock_page.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_fetch_applies_abort_request_predicate(mock_browser, mock_page):
+    """When abort_request is set, fetch routes requests through the predicate."""
+    downloader = CamoufoxDownloader(
+        browser=mock_browser,
+        contexts={"default": {}},
+        abort_request=lambda req: req.resource_type == "image",
+    )
+    await downloader._create_all_contexts()
+
+    await downloader.fetch(Request(url="https://example.com"))
+
+    # The route handler is registered for every request.
+    mock_page.route.assert_awaited_once()
+    pattern, handler = mock_page.route.await_args.args
+    assert pattern == "**/*"
+
+    # Images are aborted; everything else is allowed through.
+    image_route = Mock(request=Mock(resource_type="image"))
+    image_route.abort = AsyncMock()
+    image_route.continue_ = AsyncMock()
+    await handler(image_route)
+    image_route.abort.assert_awaited_once()
+    image_route.continue_.assert_not_called()
+
+    doc_route = Mock(request=Mock(resource_type="document"))
+    doc_route.abort = AsyncMock()
+    doc_route.continue_ = AsyncMock()
+    await handler(doc_route)
+    doc_route.continue_.assert_awaited_once()
+    doc_route.abort.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_abort_predicate_async_supported(mock_browser, mock_page):
+    """An async abort predicate is awaited and its result honored."""
+
+    async def predicate(req):
+        return req.resource_type == "image"
+
+    downloader = CamoufoxDownloader(
+        browser=mock_browser, contexts={"default": {}}, abort_request=predicate
+    )
+    await downloader._create_all_contexts()
+    await downloader.fetch(Request(url="https://example.com"))
+
+    _, handler = mock_page.route.await_args.args
+
+    image_route = Mock(request=Mock(resource_type="image"))
+    image_route.abort = AsyncMock()
+    image_route.continue_ = AsyncMock()
+    await handler(image_route)
+    image_route.abort.assert_awaited_once()
+
+    doc_route = Mock(request=Mock(resource_type="document"))
+    doc_route.abort = AsyncMock()
+    doc_route.continue_ = AsyncMock()
+    await handler(doc_route)
+    doc_route.continue_.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_abort_predicate_error_continues(mock_browser, mock_page):
+    """A predicate that raises is caught and the request continues (fail-open)."""
+
+    def boom(req):
+        raise ValueError("predicate bug")
+
+    downloader = CamoufoxDownloader(
+        browser=mock_browser, contexts={"default": {}}, abort_request=boom
+    )
+    await downloader._create_all_contexts()
+    await downloader.fetch(Request(url="https://example.com"))
+
+    _, handler = mock_page.route.await_args.args
+
+    route = Mock(request=Mock(resource_type="image"))
+    route.abort = AsyncMock()
+    route.continue_ = AsyncMock()
+    await handler(route)
+    route.continue_.assert_awaited_once()
+    route.abort.assert_not_called()
 
 
 @pytest.mark.asyncio

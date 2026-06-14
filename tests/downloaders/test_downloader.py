@@ -98,3 +98,56 @@ def test_downloader_has_signals(mock_session):
     assert downloader.signals is not None
     # Signal dispatcher is available
     assert hasattr(downloader, "signals")
+
+
+@pytest.mark.asyncio
+async def test_headers_received_emitted_before_body(mock_session, monkeypatch):
+    """headers_received fires (with the response headers) before the body is read."""
+    import qcrawl.downloaders.http as http_mod
+    from qcrawl import signals
+    from qcrawl.core.request import Request
+
+    events: list[str] = []
+    captured_headers: list[dict[str, str]] = []
+
+    class FakeResp:
+        headers = {"Content-Type": "text/html", "Content-Length": "123"}
+        status = 200
+
+    class FakeRequestCM:
+        async def __aenter__(self):
+            return FakeResp()
+
+        async def __aexit__(self, *exc):
+            return False
+
+    mock_session.request = Mock(return_value=FakeRequestCM())
+
+    async def fake_from_response(resp, request=None):
+        events.append("body_read")  # marks the point the body would be read
+        page = Mock()
+        page.headers = dict(resp.headers)
+        page.content = b"<html></html>"
+        return page
+
+    monkeypatch.setattr(http_mod.Page, "from_response", fake_from_response)
+
+    downloader = HTTPDownloader(mock_session, own_session=False)
+
+    async def on_headers(sender, headers=None, request=None, **kwargs):
+        events.append("headers")
+        captured_headers.append(headers)
+
+    async def on_bytes(sender, data=None, request=None, **kwargs):
+        events.append("bytes")
+
+    signals.signals_registry.connect("headers_received", on_headers, sender=downloader, weak=False)
+    signals.signals_registry.connect("bytes_received", on_bytes, sender=downloader, weak=False)
+    try:
+        await downloader.fetch(Request(url="https://example.com"))
+    finally:
+        signals.signals_registry.disconnect("headers_received", on_headers, sender=downloader)
+        signals.signals_registry.disconnect("bytes_received", on_bytes, sender=downloader)
+
+    assert events == ["headers", "body_read", "bytes"]
+    assert captured_headers[0]["Content-Type"] == "text/html"

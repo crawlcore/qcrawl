@@ -340,6 +340,26 @@ class CamoufoxDownloader:
                 if hasattr(page, "set_default_timeout"):
                     page.set_default_timeout(page_timeout)
 
+                # Apply the request-abort predicate (CAMOUFOX_ABORT_REQUEST), if set.
+                abort_request = self._abort_request
+                if callable(abort_request):
+
+                    async def _abort_route(route: object) -> None:
+                        try:
+                            result = abort_request(route.request)
+                            if inspect.isawaitable(result):
+                                result = await result
+                            should_abort = bool(result)
+                        except Exception:
+                            logger.exception("CAMOUFOX_ABORT_REQUEST predicate failed")
+                            should_abort = False
+                        if should_abort:
+                            await route.abort()
+                        else:
+                            await route.continue_()
+
+                    await page.route("**/*", _abort_route)
+
                 # Register event handlers
                 if event_handlers and isinstance(event_handlers, dict):
                     await self._register_event_handlers(page, event_handlers)
@@ -393,6 +413,11 @@ class CamoufoxDownloader:
 
                 # Emit signals
                 try:
+                    await self.signals.send_async(
+                        "headers_received",
+                        headers=result.headers,
+                        request=request,
+                    )
                     await self.signals.send_async(
                         "response_received",
                         response=result,

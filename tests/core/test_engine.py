@@ -1,6 +1,6 @@
 """Tests for qcrawl.core.engine.CrawlEngine"""
 
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -386,8 +386,8 @@ async def test_emit_parse_result_dropped_item_emits_item_dropped(engine):
 
 
 @pytest.mark.asyncio
-async def test_item_processor_error_drops_one_item_not_the_whole_response(mock_handler_manager):
-    """A processor error drops only that item; the rest of the parse output continues."""
+async def test_item_processor_error_emits_item_error_and_continues(mock_handler_manager):
+    """A processor error emits item_error for that item; the rest of the parse continues."""
 
     async def buggy_processor(item, spider):
         if item.data.get("id") == 2:
@@ -407,16 +407,16 @@ async def test_item_processor_error_drops_one_item_not_the_whole_response(mock_h
     engine._item_processor = buggy_processor
 
     scraped: list[int] = []
-    dropped: list[int] = []
+    errored: list[int] = []
 
     async def on_scraped(sender, item, spider=None, **kwargs):
         scraped.append(item.data["id"])
 
-    async def on_dropped(sender, item=None, spider=None, **kwargs):
-        dropped.append(item.data["id"])
+    async def on_error(sender, item=None, error=None, spider=None, **kwargs):
+        errored.append(item.data["id"])
 
     signals.signals_registry.connect("item_scraped", on_scraped, sender=engine, weak=False)
-    signals.signals_registry.connect("item_dropped", on_dropped, sender=engine, weak=False)
+    signals.signals_registry.connect("item_error", on_error, sender=engine, weak=False)
     request = Request(url="https://example.com")
     response = Page(
         url="https://example.com", content=b"", status_code=200, headers={}, request=request
@@ -425,7 +425,106 @@ async def test_item_processor_error_drops_one_item_not_the_whole_response(mock_h
         await engine._process_parse_results(request, response)
     finally:
         signals.signals_registry.disconnect("item_scraped", on_scraped, sender=engine)
-        signals.signals_registry.disconnect("item_dropped", on_dropped, sender=engine)
+        signals.signals_registry.disconnect("item_error", on_error, sender=engine)
 
     assert scraped == [1, 3]
-    assert dropped == [2]
+    assert errored == [2]
+
+
+@pytest.mark.asyncio
+async def test_handle_exception_emits_request_failed(engine):
+    """A request failure emits request_failed with the request and error."""
+    import aiohttp
+
+    failed: list[tuple[object, object]] = []
+
+    async def on_failed(sender, request=None, error=None, spider=None, **kwargs):
+        failed.append((request, error))
+
+    signals.signals_registry.connect("request_failed", on_failed, sender=engine, weak=False)
+    request = Request(url="https://example.com")
+    exc = aiohttp.ClientError("boom")
+    try:
+        await engine._handle_exception(request, exc)
+    finally:
+        signals.signals_registry.disconnect("request_failed", on_failed, sender=engine)
+
+    assert len(failed) == 1
+    assert failed[0][0] is request
+    assert failed[0][1] is exc
+
+
+@pytest.mark.asyncio
+async def test_request_failed_not_emitted_when_retried(engine, mock_scheduler):
+    """A retryable exception reschedules the request and does NOT emit request_failed."""
+    import aiohttp
+
+    fired: list[int] = []
+
+    async def on_failed(sender, request=None, error=None, spider=None, **kwargs):
+        fired.append(1)
+
+    class RetryMW(DownloaderMiddleware):
+        async def process_request(self, request, spider):
+            return MiddlewareResult.continue_()
+
+        async def process_response(self, request, response, spider):
+            return MiddlewareResult.keep(response)
+
+        async def process_exception(self, request, exception, spider):
+            return MiddlewareResult.retry(request)
+
+    engine.add_middleware(RetryMW())
+    mock_scheduler.add = AsyncMock()
+    signals.signals_registry.connect("request_failed", on_failed, sender=engine, weak=False)
+    request = Request(url="https://example.com")
+    try:
+        await engine._handle_exception(request, aiohttp.ClientError("boom"))
+    finally:
+        signals.signals_registry.disconnect("request_failed", on_failed, sender=engine)
+
+    assert fired == []  # rescheduled, not failed
+    mock_scheduler.add.assert_awaited_once_with(request)
+
+
+@pytest.mark.asyncio
+async def test_parse_results_dispatches_to_named_callback(engine, spider):
+    """A request whose callback names a spider method routes the response there with cb_kwargs."""
+    calls: list[object] = []
+
+    async def parse_detail(response, page=None):
+        calls.append(page)
+        return
+        yield  # noqa: makes this an async generator
+
+    spider.parse_detail = parse_detail
+
+    request = Request(url="https://example.com/x", callback="parse_detail", cb_kwargs={"page": 7})
+    response = Page(
+        url="https://example.com/x", content=b"", status_code=200, headers={}, request=request
+    )
+
+    await engine._process_parse_results(request, response)
+
+    assert calls == [7]
+
+
+@pytest.mark.asyncio
+async def test_drain_idle_loops_until_no_new_work(engine, mock_scheduler):
+    """_drain_idle re-fires spider_idle while a handler enqueues work, then stops."""
+    fires: list[int] = []
+
+    async def on_idle(sender, spider=None, **kwargs):
+        fires.append(1)
+
+    # Round 1: handler added work (qsize 2) -> drain and fire again.
+    # Round 2: nothing added (qsize 0) -> stop.  qsize() is async on Scheduler.
+    mock_scheduler.qsize = AsyncMock(side_effect=[2, 0])
+    mock_scheduler.join = AsyncMock()
+    signals.signals_registry.connect("spider_idle", on_idle, sender=engine, weak=False)
+    try:
+        await engine._drain_idle()
+    finally:
+        signals.signals_registry.disconnect("spider_idle", on_idle, sender=engine)
+
+    assert len(fires) == 2

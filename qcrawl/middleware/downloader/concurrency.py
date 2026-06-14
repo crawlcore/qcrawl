@@ -58,9 +58,10 @@ class ConcurrencyMiddleware(DownloaderMiddleware):
         Returns:
             ConcurrencyMiddleware instance configured from settings
         """
-        settings = crawler.runtime_settings
-        concurrency = getattr(settings, "CONCURRENCY_PER_DOMAIN", 2)
-        return cls(concurrency_per_domain=concurrency)
+        from qcrawl.settings import Settings
+
+        settings: Settings = getattr(crawler, "runtime_settings", None) or Settings()
+        return cls(concurrency_per_domain=settings.CONCURRENCY_PER_DOMAIN)
 
     def _get_domain(self, url: str) -> str:
         """Extract domain from URL, fallback to 'default' on error."""

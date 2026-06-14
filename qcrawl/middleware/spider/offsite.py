@@ -18,7 +18,7 @@ class OffsiteMiddleware(SpiderMiddleware):
     """Filter requests to URLs outside allowed domains.
 
     Features:
-        - Configurable allowed domains per spider (`ALLOWED_DOMAINS` or auto-extract from `start_urls`)
+        - Configurable allowed domains per spider (`allowed_domains` or auto-extract from `start_urls`)
         - Automatic domain extraction and normalization (strip ports, lowercase)
         - Subdomain support (example.com allows api.example.com)
         - Accepts `Request` objects and `str` URLs from spider output (converts `str` to `Request`)
@@ -37,13 +37,16 @@ class OffsiteMiddleware(SpiderMiddleware):
 
     def _get_allowed_domains(self, spider: "Spider") -> set[str] | None:
         """Return a set of allowed domains (normalized), or None to allow all.
-        Accepts `ALLOWED_DOMAINS` attribute (str, list, tuple, set) on spider.
-        If not provided, extracts domains from `start_urls`.
+        Reads the spider's `allowed_domains` attribute (str/list/tuple/set). If
+        not set, extracts domains from `start_urls`.
         """
-        allowed = getattr(spider, "ALLOWED_DOMAINS", None)
+        allowed = getattr(spider, "allowed_domains", None)
         if allowed is not None:
+            if not isinstance(allowed, (str, list, tuple, set)):
+                raise TypeError("allowed_domains must be a str or a collection of str")
             if isinstance(allowed, (list, tuple, set)):
-                return {self._normalize_domain(d) for d in allowed if d}
+                # Empty collection -> None (allow all), same as "" and unset.
+                return {self._normalize_domain(d) for d in allowed if d} or None
             return {self._normalize_domain(allowed)} if allowed else None
 
         start_urls = getattr(spider, "start_urls", [])
@@ -100,6 +103,35 @@ class OffsiteMiddleware(SpiderMiddleware):
         """Heuristic check for Request instances without importing at module level."""
         return hasattr(item, "url") and hasattr(item, "meta")
 
+    async def _emit_offsite_drop(
+        self,
+        url: str,
+        request: "Request | None",
+        spider: "Spider",
+        allowed_domains: set[str],
+    ) -> None:
+        """Record and signal that an offsite URL was filtered out.
+
+        Shared by the Request and str branches of `process_spider_output`; pass
+        the dropped `Request` (or `None` for a bare URL string).
+        """
+        self._dropped_count += 1
+
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "Filtered offsite request to %s: %s (allowed: %s)",
+                self._extract_domain(url),
+                url,
+                ", ".join(sorted(allowed_domains)),
+            )
+
+        dispatcher = getattr(spider, "signals", None)
+        try:
+            if dispatcher is not None:
+                await dispatcher.send_async("request_dropped", request=request, exception=None)
+        except Exception:
+            logger.exception("Error sending request_dropped signal for %s", url)
+
     async def process_spider_output(
         self,
         response: "Page",
@@ -136,58 +168,16 @@ class OffsiteMiddleware(SpiderMiddleware):
 
             # Handle Request objects
             if isinstance(item, _Req):
-                req = item
-                # Check offsite
-                if self._is_offsite(req.url, allowed_domains):
-                    self._dropped_count += 1
-
-                    if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(
-                            "Filtered offsite request to %s: %s (allowed: %s)",
-                            self._extract_domain(req.url),
-                            req.url,
-                            ", ".join(sorted(allowed_domains)),
-                        )
-
-                    # Emit request_dropped signal for stats if available
-                    dispatcher = getattr(spider, "signals", None)
-                    try:
-                        if dispatcher is not None:
-                            await dispatcher.send_async(
-                                "request_dropped",
-                                request=req,
-                                exception=None,
-                            )
-                    except Exception:
-                        logger.exception("Error sending request_dropped signal for %s", req.url)
+                if self._is_offsite(item.url, allowed_domains):
+                    await self._emit_offsite_drop(item.url, item, spider, allowed_domains)
                     continue
-
-                yield req
+                yield item
                 continue
 
             # Handle string URLs: convert to Request
             if isinstance(item, str):
                 if self._is_offsite(item, allowed_domains):
-                    self._dropped_count += 1
-
-                    if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(
-                            "Filtered offsite request to %s: %s (allowed: %s)",
-                            self._extract_domain(item),
-                            item,
-                            ", ".join(sorted(allowed_domains)),
-                        )
-
-                    dispatcher = getattr(spider, "signals", None)
-                    try:
-                        if dispatcher is not None:
-                            await dispatcher.send_async(
-                                "request_dropped",
-                                request=None,
-                                exception=None,
-                            )
-                    except Exception:
-                        logger.exception("Error sending request_dropped signal for %s", item)
+                    await self._emit_offsite_drop(item, None, spider, allowed_domains)
                     continue
 
                 new_req = _Req(url=item, priority=0, meta={"depth": current_depth + 1})
@@ -209,4 +199,4 @@ class OffsiteMiddleware(SpiderMiddleware):
     async def close_spider(self, spider: "Spider") -> None:
         """Log offsite statistics when spider closes."""
         if self._dropped_count > 0:
-            spider.crawler.stats.set_counter("offsite/filtered", self._dropped_count)
+            spider.crawler.stats.set("offsite/filtered", self._dropped_count)

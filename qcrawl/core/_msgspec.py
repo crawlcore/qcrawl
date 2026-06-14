@@ -28,6 +28,8 @@ class RequestStruct(msgspec.Struct):
     proxy: str | None
     meta: dict[str, object] | None
     ts: int
+    callback: str | None = None
+    cb_kwargs: dict[str, object] | None = None
 
 
 def encode_request(request: Request) -> bytes:
@@ -52,6 +54,8 @@ def encode_request(request: Request) -> bytes:
         proxy=getattr(request, "proxy", None),
         meta=request.meta,
         ts=getattr(request, "ts", 0) or int(time.time() * 1000),
+        callback=request.callback if isinstance(request.callback, str) else None,
+        cb_kwargs=getattr(request, "cb_kwargs", None) or None,
     )
     return bytes(msgspec.msgpack.encode(struct))
 
@@ -94,4 +98,6 @@ def decode_request(data: bytes) -> Request:
         proxy=struct.proxy,
         meta=struct.meta or {},
         ts=ts,
+        callback=struct.callback,
+        cb_kwargs=struct.cb_kwargs or {},
     )

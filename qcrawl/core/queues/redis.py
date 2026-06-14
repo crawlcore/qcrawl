@@ -220,9 +220,14 @@ class RedisQueue(RequestQueue):
 
     def __init__(
         self,
-        url: str = "redis://localhost:6379/0",
+        url: str | None = None,
         namespace: str = "qcrawl",
         *,
+        host: str = "localhost",
+        port: int | str = 6379,
+        db: int | str = 0,
+        user: str | None = None,
+        password: str | None = None,
         ssl: bool = False,
         dedupe: bool = False,
         update_priority: bool = False,
@@ -233,13 +238,28 @@ class RedisQueue(RequestQueue):
         maxsize: int | None = None,
         **redis_kwargs: object,
     ) -> None:
-        self.client = Redis.from_url(
-            url,
-            decode_responses=False,
-            retry_on_timeout=True,
-            health_check_interval=30,
+        """Create a Redis-backed queue.
+
+        `url` takes precedence when given; otherwise the connection is built
+        from `host`/`port`/`db`, with `user`/`password` and `ssl` (the
+        `rediss://` scheme) applied when set. Extra `redis_kwargs` pass through
+        to the redis client.
+        """
+        client_kwargs: dict[str, object] = {
+            "retry_on_timeout": True,
+            "health_check_interval": 30,
             **redis_kwargs,
-        )
+            # Bytes-only invariant (msgpack payloads / SHAs / ids); not user-overridable.
+            "decode_responses": False,
+        }
+        if url:
+            self.client = Redis.from_url(url, **client_kwargs)
+        else:
+            scheme = "rediss" if ssl else "redis"
+            built_url = f"{scheme}://{host}:{int(port)}/{int(db)}"
+            self.client = Redis.from_url(
+                built_url, username=user, password=password, **client_kwargs
+            )
         self.zset_key = f"{namespace}:queue:zset"
         self.hash_key = f"{namespace}:queue:items"
         self.fp_set_key = f"{namespace}:queue:fpset"

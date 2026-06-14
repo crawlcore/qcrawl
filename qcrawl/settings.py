@@ -39,10 +39,21 @@ class Settings:
     CONCURRENCY: int = 10
     CONCURRENCY_PER_DOMAIN: int = 2
     DELAY_PER_DOMAIN: float = 0.25
+    RANDOMIZE_DELAY: bool = False
     MAX_DEPTH: int = 0  # 0 = unlimited
     TIMEOUT: float = 30.0
     MAX_RETRIES: int = 3
+    RETRY_HTTP_CODES: list[int] = field(default_factory=lambda: [429, 500, 502, 503, 504])
+    RETRY_PRIORITY_ADJUST: int = -1
+    RETRY_BACKOFF_BASE: float = 1.0
+    RETRY_BACKOFF_MAX: float = 60.0
+    RETRY_BACKOFF_JITTER: float = 0.3
+    RETRY_ENABLED: bool = True
+    COOKIES_ENABLED: bool = True
     USER_AGENT: str = "qCrawl/1.0"
+    # Request-fingerprint (dedup) query handling; mutually exclusive.
+    IGNORE_QUERY_PARAMS: set[str] | None = None
+    KEEP_QUERY_PARAMS: set[str] | None = None
 
     # Default headers for outgoing requests
     DEFAULT_REQUEST_HEADERS: dict[str, str] = field(
@@ -139,9 +150,9 @@ class Settings:
                 "maxsize": 0,  # Max requests count (0 = unlimited)
                 "url": None,
                 "host": "localhost",
-                "port": "6379",
-                "user": "user",
-                "password": "pass",
+                "port": 6379,
+                "user": None,
+                "password": None,
                 "namespace": "qcrawl",
                 "ssl": False,
                 "dedupe": False,
@@ -176,8 +187,40 @@ class Settings:
         if self.TIMEOUT <= 0:
             raise ValueError(f"timeout must be > 0, got {self.TIMEOUT}")
 
+        if not isinstance(self.DELAY_PER_DOMAIN, (int, float)) or isinstance(
+            self.DELAY_PER_DOMAIN, bool
+        ):
+            raise TypeError("DELAY_PER_DOMAIN must be a number")
+        if self.DELAY_PER_DOMAIN < 0:
+            raise ValueError(f"delay_per_domain must be >= 0, got {self.DELAY_PER_DOMAIN}")
+
         if self.MAX_RETRIES < 0:
             raise ValueError(f"max_retries must be >= 0, got {self.MAX_RETRIES}")
+
+        if not isinstance(self.MAX_DEPTH, int) or isinstance(self.MAX_DEPTH, bool):
+            raise TypeError("MAX_DEPTH must be an int")
+        if self.MAX_DEPTH < 0:
+            raise ValueError(f"max_depth must be >= 0, got {self.MAX_DEPTH}")
+
+        if not isinstance(self.RETRY_PRIORITY_ADJUST, int) or isinstance(
+            self.RETRY_PRIORITY_ADJUST, bool
+        ):
+            raise TypeError("RETRY_PRIORITY_ADJUST must be an int")
+
+        if not isinstance(self.RETRY_HTTP_CODES, (list, tuple, set)) or not all(
+            isinstance(c, int) and not isinstance(c, bool) for c in self.RETRY_HTTP_CODES
+        ):
+            raise TypeError("RETRY_HTTP_CODES must be a collection of ints")
+
+        for _name in ("RETRY_BACKOFF_BASE", "RETRY_BACKOFF_MAX", "RETRY_BACKOFF_JITTER"):
+            _val = getattr(self, _name)
+            if not isinstance(_val, (int, float)) or isinstance(_val, bool):
+                raise TypeError(f"{_name} must be a number")
+            if _val < 0:
+                raise ValueError(f"{_name} must be >= 0, got {_val}")
+
+        if self.IGNORE_QUERY_PARAMS and self.KEEP_QUERY_PARAMS:
+            raise ValueError("IGNORE_QUERY_PARAMS and KEEP_QUERY_PARAMS are mutually exclusive")
 
         # PIPELINES
         if self.PIPELINES is not None:

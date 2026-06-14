@@ -37,6 +37,7 @@ class RetryMiddleware(DownloaderMiddleware):
         backoff_base: float = 1.0,
         backoff_max: float = 60.0,
         backoff_jitter: float = 0.3,
+        enabled: bool = True,
     ) -> None:
         """Initialize RetryMiddleware.
 
@@ -47,7 +48,9 @@ class RetryMiddleware(DownloaderMiddleware):
             backoff_base: base multiplier for exponential backoff in seconds.
             backoff_max: maximum backoff delay in seconds.
             backoff_jitter: jitter fraction applied to computed backoff (0.0 = no jitter).
+            enabled: when False, responses/exceptions pass through without retrying.
         """
+        self._enabled = bool(enabled)
         self.max_retries = int(max_retries)
         default_codes = {429, 500, 502, 503, 504}
         self.retry_http_codes = (
@@ -57,6 +60,41 @@ class RetryMiddleware(DownloaderMiddleware):
         self.backoff_base = float(backoff_base)
         self.backoff_max = float(backoff_max)
         self.backoff_jitter = float(backoff_jitter)
+
+    @classmethod
+    def from_crawler(cls, crawler):
+        """Create from crawler, reading the `MAX_RETRIES`, `RETRY_HTTP_CODES`,
+        `RETRY_PRIORITY_ADJUST`, `RETRY_BACKOFF_*` and `RETRY_ENABLED` settings.
+
+        `Settings` validates these (types and ranges), so the values are trusted
+        here; the constructor still coerces them for direct (non-settings) use.
+        """
+        from qcrawl.settings import Settings
+
+        settings: Settings = getattr(crawler, "runtime_settings", None) or Settings()
+        return cls(
+            max_retries=settings.MAX_RETRIES,
+            retry_http_codes=settings.RETRY_HTTP_CODES,
+            priority_adjust=settings.RETRY_PRIORITY_ADJUST,
+            backoff_base=settings.RETRY_BACKOFF_BASE,
+            backoff_max=settings.RETRY_BACKOFF_MAX,
+            backoff_jitter=settings.RETRY_BACKOFF_JITTER,
+            enabled=settings.RETRY_ENABLED,
+        )
+
+    def _dont_retry(self, request: Request) -> bool:
+        """True when the request opts out of retries via `meta['dont_retry']`."""
+        meta = getattr(request, "meta", None)
+        return bool(meta.get("dont_retry")) if isinstance(meta, dict) else False
+
+    def _max_retries_for(self, request: Request) -> int:
+        """Per-request retry cap: `meta['max_retry_times']` overrides `max_retries`."""
+        meta = getattr(request, "meta", None)
+        if isinstance(meta, dict):
+            val = meta.get("max_retry_times")
+            if isinstance(val, int) and not isinstance(val, bool) and val >= 0:
+                return val
+        return self.max_retries
 
     def _compute_delay(self, retry_count: int, header_retry_after: int | None = None) -> float:
         """Compute delay for next retry.
@@ -128,22 +166,21 @@ class RetryMiddleware(DownloaderMiddleware):
             MiddlewareResult.continue_() for non-transient exceptions.
         """
         transient = isinstance(exception, (aiohttp.ClientError, asyncio.TimeoutError))
-        if not transient:
+        if not self._enabled or not transient or self._dont_retry(request):
             return MiddlewareResult.continue_()
 
+        max_retries = self._max_retries_for(request)
         retry_count = self._get_retry_count(request)
-        if retry_count >= self.max_retries:
-            spider.crawler.stats.inc_counter("downloader/retry/max_reached")
-            spider.crawler.stats.inc_counter("downloader/retry/network_error")
+        if retry_count >= max_retries:
+            spider.crawler.stats.inc("downloader/retry/max_reached")
+            spider.crawler.stats.inc("downloader/retry/network_error")
             return MiddlewareResult.drop()
 
         delay = self._compute_delay(retry_count, None)
-        spider.crawler.stats.inc_counter("downloader/retry/total")
-        spider.crawler.stats.inc_counter("downloader/retry/network_error")
-        spider.crawler.stats.inc_counter(
-            f"downloader/retry/network_error/{type(exception).__name__}"
-        )
-        spider.crawler.stats.inc_counter(f"downloader/retry/attempt/{retry_count + 1}")
+        spider.crawler.stats.inc("downloader/retry/total")
+        spider.crawler.stats.inc("downloader/retry/network_error")
+        spider.crawler.stats.inc(f"downloader/retry/network_error/{type(exception).__name__}")
+        spider.crawler.stats.inc(f"downloader/retry/attempt/{retry_count + 1}")
 
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(
@@ -151,7 +188,7 @@ class RetryMiddleware(DownloaderMiddleware):
                 request.url,
                 type(exception).__name__,
                 retry_count + 1,
-                self.max_retries,
+                max_retries,
             )
         return MiddlewareResult.retry(self._make_retry_request(request, delay))
 
@@ -170,14 +207,15 @@ class RetryMiddleware(DownloaderMiddleware):
             MiddlewareResult.keep(response) to pass the response onward.
         """
         status = getattr(response, "status_code", None)
-        if status not in self.retry_http_codes:
+        if not self._enabled or status not in self.retry_http_codes or self._dont_retry(request):
             return MiddlewareResult.keep(response)
 
+        max_retries = self._max_retries_for(request)
         retry_count = self._get_retry_count(request)
-        if retry_count >= self.max_retries:
-            spider.crawler.stats.inc_counter("downloader/retry/max_reached")
-            spider.crawler.stats.inc_counter("downloader/retry/http_error")
-            spider.crawler.stats.inc_counter(f"downloader/retry/http_status/{status}")
+        if retry_count >= max_retries:
+            spider.crawler.stats.inc("downloader/retry/max_reached")
+            spider.crawler.stats.inc("downloader/retry/http_error")
+            spider.crawler.stats.inc(f"downloader/retry/http_status/{status}")
             return MiddlewareResult.keep(response)
 
         retry_after = None
@@ -188,10 +226,10 @@ class RetryMiddleware(DownloaderMiddleware):
                     retry_after = int(ra)
 
         delay = self._compute_delay(retry_count, retry_after)
-        spider.crawler.stats.inc_counter("downloader/retry/total")
-        spider.crawler.stats.inc_counter("downloader/retry/http_error")
-        spider.crawler.stats.inc_counter(f"downloader/retry/http_status/{status}")
-        spider.crawler.stats.inc_counter(f"downloader/retry/attempt/{retry_count + 1}")
+        spider.crawler.stats.inc("downloader/retry/total")
+        spider.crawler.stats.inc("downloader/retry/http_error")
+        spider.crawler.stats.inc(f"downloader/retry/http_status/{status}")
+        spider.crawler.stats.inc(f"downloader/retry/attempt/{retry_count + 1}")
 
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(
@@ -199,7 +237,7 @@ class RetryMiddleware(DownloaderMiddleware):
                 request.url,
                 status,
                 retry_count + 1,
-                self.max_retries,
+                max_retries,
             )
         return MiddlewareResult.retry(self._make_retry_request(request, delay))
 

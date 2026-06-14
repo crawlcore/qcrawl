@@ -14,6 +14,54 @@ def test_camoufox_process_request_headers_default():
     assert settings.CAMOUFOX_PROCESS_REQUEST_HEADERS == "use_qcrawl_headers"
 
 
+def test_rejects_both_query_param_filters():
+    """IGNORE_QUERY_PARAMS and KEEP_QUERY_PARAMS cannot both be set."""
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        Settings(IGNORE_QUERY_PARAMS={"a"}, KEEP_QUERY_PARAMS={"b"})
+
+
+def test_rejects_noninteger_max_depth():
+    """MAX_DEPTH must be an int."""
+    with pytest.raises(TypeError, match="MAX_DEPTH must be an int"):
+        Settings(MAX_DEPTH="3")  # type: ignore[arg-type]
+
+
+def test_rejects_negative_max_depth():
+    """MAX_DEPTH must be >= 0."""
+    with pytest.raises(ValueError, match="max_depth must be >= 0"):
+        Settings(MAX_DEPTH=-1)
+
+
+def test_rejects_nonnumeric_delay_per_domain():
+    """DELAY_PER_DOMAIN must be a number."""
+    with pytest.raises(TypeError, match="DELAY_PER_DOMAIN must be a number"):
+        Settings(DELAY_PER_DOMAIN="x")  # type: ignore[arg-type]
+
+
+def test_rejects_negative_delay_per_domain():
+    """DELAY_PER_DOMAIN must be >= 0."""
+    with pytest.raises(ValueError, match="delay_per_domain must be >= 0"):
+        Settings(DELAY_PER_DOMAIN=-1.0)
+
+
+def test_rejects_bad_retry_http_codes():
+    """RETRY_HTTP_CODES must be a collection of ints."""
+    with pytest.raises(TypeError, match="RETRY_HTTP_CODES must be a collection of ints"):
+        Settings(RETRY_HTTP_CODES=500)  # type: ignore[arg-type]
+
+
+def test_rejects_negative_retry_backoff():
+    """RETRY_BACKOFF_* must be >= 0."""
+    with pytest.raises(ValueError, match="RETRY_BACKOFF_BASE must be >= 0"):
+        Settings(RETRY_BACKOFF_BASE=-1.0)
+
+
+def test_rejects_noninteger_retry_priority_adjust():
+    """RETRY_PRIORITY_ADJUST must be an int."""
+    with pytest.raises(TypeError, match="RETRY_PRIORITY_ADJUST must be an int"):
+        Settings(RETRY_PRIORITY_ADJUST=1.5)  # type: ignore[arg-type]
+
+
 # Valid Values Tests
 
 

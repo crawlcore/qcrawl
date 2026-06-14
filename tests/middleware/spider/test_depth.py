@@ -26,6 +26,38 @@ def test_middleware_init_custom():
     assert middleware.default_priority == 2
 
 
+def test_from_crawler_reads_max_depth_setting():
+    """from_crawler reads MAX_DEPTH from the crawler's runtime settings."""
+    from types import SimpleNamespace
+
+    from qcrawl.settings import Settings
+
+    crawler = SimpleNamespace(runtime_settings=Settings(MAX_DEPTH=3))
+    middleware = DepthMiddleware.from_crawler(crawler)
+
+    assert middleware.default_max_depth == 3
+
+
+def test_spider_max_depth_attr_overrides_default():
+    """A spider's max_depth attribute overrides from_crawler's default_max_depth."""
+    from types import SimpleNamespace
+
+    middleware = DepthMiddleware(default_max_depth=2)
+    spider = SimpleNamespace(max_depth=5)
+
+    assert middleware._get_max_depth(spider) == 5  # type: ignore[arg-type]
+
+
+def test_get_max_depth_falls_back_to_default():
+    """Without a max_depth attribute, _get_max_depth uses default_max_depth."""
+    from types import SimpleNamespace
+
+    middleware = DepthMiddleware(default_max_depth=2)
+    spider = SimpleNamespace()
+
+    assert middleware._get_max_depth(spider) == 2  # type: ignore[arg-type]
+
+
 # Helper Method Tests
 
 
