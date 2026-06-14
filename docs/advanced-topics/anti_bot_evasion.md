@@ -35,11 +35,8 @@ custom_settings = {
     # Delay between requests to same domain (seconds)
     "DELAY_PER_DOMAIN": 2.0,
 
-    # Random delay range (adds randomness to delays)
-    "RANDOMIZE_DOWNLOAD_DELAY": True,
-
-    # Download delay (global, across all domains)
-    "DOWNLOAD_DELAY": 1.0,
+    # Jitter the per-domain delay to 50-150% per request
+    "RANDOMIZE_DELAY": True,
 }
 ```
 
@@ -48,8 +45,7 @@ custom_settings = {
 - `CONCURRENCY`: Maximum concurrent requests across all domains
 - `CONCURRENCY_PER_DOMAIN`: Maximum concurrent requests per domain (most important for anti-bot)
 - `DELAY_PER_DOMAIN`: Minimum delay between requests to same domain
-- `RANDOMIZE_DOWNLOAD_DELAY`: Adds random variance to delays (0.5x to 1.5x)
-- `DOWNLOAD_DELAY`: Global minimum delay between any requests
+- `RANDOMIZE_DELAY`: Jitters `DELAY_PER_DOMAIN` to 50-150% per request
 
 **Example Spider:**
 
@@ -62,7 +58,7 @@ class PoliteSpider(Spider):
     custom_settings = {
         "CONCURRENCY_PER_DOMAIN": 1,  # One request at a time per domain
         "DELAY_PER_DOMAIN": 3.0,       # 3 seconds between requests
-        "RANDOMIZE_DOWNLOAD_DELAY": True,  # Vary timing naturally
+        "RANDOMIZE_DELAY": True,  # Vary timing naturally
     }
 ```
 
@@ -217,7 +213,7 @@ custom_settings = {
     },
 
     # Retry configuration
-    "RETRY_TIMES": 3,  # Maximum retry attempts
+    "MAX_RETRIES": 3,  # Maximum retry attempts
 
     # HTTP status codes that trigger retry
     "RETRY_HTTP_CODES": [500, 502, 503, 504, 408, 429],
@@ -232,7 +228,7 @@ custom_settings = {
 1. Request fails with retryable status code (e.g., 503 Service Unavailable)
 2. Request is re-queued with lower priority
 3. Natural delay occurs before retry (due to queue processing)
-4. Process repeats up to `RETRY_TIMES` attempts
+4. Process repeats up to `MAX_RETRIES` attempts
 
 **Custom Retry Logic:**
 
@@ -401,7 +397,7 @@ class StealthSpider(Spider):
         "CONCURRENCY": 2,
         "CONCURRENCY_PER_DOMAIN": 1,
         "DELAY_PER_DOMAIN": 3.0,
-        "RANDOMIZE_DOWNLOAD_DELAY": True,
+        "RANDOMIZE_DELAY": True,
 
         # Headers (qCrawl framework-level)
         "DEFAULT_REQUEST_HEADERS": {
@@ -412,7 +408,7 @@ class StealthSpider(Spider):
         },
 
         # Retry with backoff (qCrawl framework-level)
-        "RETRY_TIMES": 3,
+        "MAX_RETRIES": 3,
         "RETRY_HTTP_CODES": [500, 502, 503, 504, 408, 429],
 
         # Middlewares (qCrawl framework-level)
@@ -568,7 +564,7 @@ if should_scrape_now():
 
 ```python
 async def parse(self, response):
-    if "captcha" in response.text.lower():
+    if "captcha" in response.text().lower()():
         self.logger.warning(f"CAPTCHA detected at {response.url}")
         # Option 1: Stop scraping
         return
@@ -601,7 +597,7 @@ class AdaptiveSpider(Spider):
                 self.detection_count -= 1
 
     def is_detected(self, response):
-        return response.status_code in [429, 403] or "captcha" in response.text.lower()
+        return response.status_code in [429, 403] or "captcha" in response.text().lower()()
 ```
 
 ## Common Anti-Bot Patterns and Solutions
@@ -616,7 +612,7 @@ custom_settings = {
     "DELAY_PER_DOMAIN": 5.0,
     "CONCURRENCY_PER_DOMAIN": 1,
     "RETRY_HTTP_CODES": [429],
-    "RETRY_TIMES": 5,
+    "MAX_RETRIES": 5,
 }
 ```
 
@@ -689,8 +685,8 @@ async def start_requests(self):
     yield Request(
         url="https://example.com/login",
         method="POST",
-        body={"username": "...", "password": "..."},
-        callback=self.after_login
+        json={"username": "...", "password": "..."},
+        callback=self.after_login,
     )
 
 async def after_login(self, response):
@@ -744,7 +740,7 @@ qCrawl provides comprehensive anti-bot evasion capabilities:
 | User Agent Rotation | Avoid fingerprinting    | Per-request headers                          |
 | Cookie Management   | Session handling        | `CookiesMiddleware` (automatic)              |
 | Proxy Support       | IP rotation             | `HttpProxyMiddleware`, per-request meta      |
-| Retry Strategy      | Handle transient errors | `RETRY_TIMES`, `RETRY_HTTP_CODES`            |
+| Retry Strategy      | Handle transient errors | `MAX_RETRIES`, `RETRY_HTTP_CODES`            |
 | Custom Headers      | Appear legitimate       | `DEFAULT_REQUEST_HEADERS`, per-request       |
 | Navigation Patterns | Human-like behavior     | PageMethod with Camoufox                     |
 

@@ -29,6 +29,18 @@ req = Request(
 yield req  # from spider's parse(), start_requests(), or middleware
 ```
 
+`body` must be `bytes`. For a JSON request, pass `json=` instead — it serializes
+the value and sets `Content-Type: application/json` (pass `body` *or* `json`, not
+both):
+
+```python
+yield Request(url="https://api.example.com/items", method="POST", json={"q": "term"})
+```
+
+Use `callback` (a spider method or its name) and `cb_kwargs` to route this
+request's response to a method other than `parse` — see
+[Per-request callbacks](spiders.md#per-request-callbacks).
+
 ### Accessing response data
 
 Inside `Spider.parse()`, you receive a `Page` object representing the HTTP response:

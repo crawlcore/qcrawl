@@ -417,7 +417,7 @@ yield Request(
     url="https://example.com",
     meta={
         "use_handler": "camoufox",
-        "camoufox_event_handlers": {
+        "camoufox_page_event_handlers": {
             "console": handle_console,
             "dialog": handle_dialog
         }

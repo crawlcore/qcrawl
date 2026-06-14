@@ -18,28 +18,30 @@ class AuthSpider(Spider):
     }
 
     async def parse(self, response):
+        # The login page: extract the CSRF token and submit the form.
         rv = self.response_view(response)
-
-        # Extract CSRF token
         csrf_token = rv.doc.cssselect("input[name=csrf_token]")[0].get("value")
 
-        # Submit login form
+        # Form login uses x-www-form-urlencoded, so encode the body (bytes).
+        from urllib.parse import urlencode
+
         yield Request(
             url="https://example.com/login",
             method="POST",
-            body={
-                "username": "user@example.com",
-                "password": "password123",
-                "csrf_token": csrf_token
-            },
-            meta={"next_action": "start_crawl"}
+            body=urlencode(
+                {
+                    "username": "user@example.com",
+                    "password": "password123",
+                    "csrf_token": csrf_token,
+                }
+            ).encode(),
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            callback=self.after_login,
         )
 
-    async def parse_logged_in(self, response):
-        # Check if login succeeded
-        if response.request.meta.get("next_action") == "start_crawl":
-            # Start crawling protected pages
-            yield Request(url="https://example.com/dashboard")
+    async def after_login(self, response):
+        # Cookies from the login are stored automatically; crawl protected pages.
+        yield Request(url="https://example.com/dashboard")
 ```
 
 **Verify login success:**
@@ -221,40 +223,32 @@ class CustomAuthSpider(Spider):
     }
 
     async def parse(self, response):
-        """Step 1: Get initial token."""
+        """Step 1: get the initial token, then submit it (routed to step 2)."""
         rv = self.response_view(response)
-
         initial_token = rv.doc.cssselect("input[name=token]")[0].get("value")
 
-        # Step 2: Submit token
         yield Request(
             url="https://example.com/step2",
             method="POST",
-            body={"token": initial_token},
-            meta={"step": 2}
+            json={"token": initial_token},
+            callback=self.submit_credentials,
         )
 
-    async def parse_step2(self, response):
-        """Step 2: Submit credentials."""
-        step = response.request.meta.get("step")
+    async def submit_credentials(self, response):
+        """Step 2: submit credentials (routed to step 3)."""
+        rv = self.response_view(response)
+        csrf = rv.doc.cssselect("input[name=csrf]")[0].get("value")
 
-        if step == 2:
-            rv = self.response_view(response)
-            csrf = rv.doc.cssselect("input[name=csrf]")[0].get("value")
+        yield Request(
+            url="https://example.com/login",
+            method="POST",
+            json={"username": "user", "password": "pass", "csrf": csrf},
+            callback=self.start_crawl,
+        )
 
-            yield Request(
-                url="https://example.com/login",
-                method="POST",
-                body={
-                    "username": "user",
-                    "password": "pass",
-                    "csrf": csrf
-                },
-                meta={"step": 3}
-            )
-        elif step == 3:
-            # Authentication complete, start crawling
-            yield Request(url="https://example.com/protected")
+    async def start_crawl(self, response):
+        """Step 3: authentication complete, start crawling."""
+        yield Request(url="https://example.com/protected")
 ```
 
 

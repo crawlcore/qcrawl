@@ -117,7 +117,7 @@ flowchart TB
 
   %% Request flow
   SPIDER -->|"yield Request"| SCHED
-  SCHED -->|"next_request()"| ENGINE
+  SCHED -->|"get()"| ENGINE
   ENGINE -->|"Downloader MW"| DOWNLOADER
   DOWNLOADER -->|"Response"| ENGINE
   ENGINE -->|"Spider MW"| SPIDER
@@ -137,7 +137,7 @@ Crawler creates components → Spider.start_requests() → Requests enqueued in 
 
 **2. Request processing (per worker)**:
 ```
-Scheduler.next_request()
+Scheduler.get()
   ↓
 Downloader Middleware chain (process_request)
   ↓

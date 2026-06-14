@@ -55,11 +55,15 @@ export QCRAWL_USER_AGENT="MyCrawler/1.0"
 
 # Queue backend selection
 export QCRAWL_QUEUE_BACKEND="disk"  # or "memory", "redis"
-
-# Disk queue configuration (optional)
-export QCRAWL_QUEUE_BACKENDS__disk__path="/var/qcrawl/queue"
-export QCRAWL_QUEUE_BACKENDS__disk__maxsize="10000"  # Max requests count
 ```
+
+Each `QCRAWL_*` variable maps to a single top-level setting (the prefix is
+stripped and the remainder uppercased); there is no `__` path-nesting. Configure
+nested queue-backend options (the disk path, the redis host/port/TTLs, etc.) in
+the `QUEUE_BACKENDS` TOML block below or programmatically via `Settings(...)`,
+where they keep their real types. To override a backend from the environment you
+must pass the whole dict as JSON, e.g.
+`export QCRAWL_QUEUE_BACKENDS='{"disk": {"path": "/var/qcrawl/queue"}}'`.
 
 !!! warning
 
@@ -143,11 +147,12 @@ maxsize = 0  # Max requests count (0 = unlimited)
 
 [QUEUE_BACKENDS.redis]
 class = "qcrawl.core.queues.redis.RedisQueue"
-# url = ""  # optional full connection URL (overrides host/port/user/password)
+# url = ""  # optional full connection URL (overrides host/port/db/user/password)
 host = "localhost"
-port = "6379"
-user = "user"
-password = "pass"
+port = 6379
+db = 0
+# user = ""      # optional username for ACL auth
+# password = ""  # optional password
 namespace = "qcrawl"
 ssl = false
 maxsize = 0  # Max requests count (0 = unlimited)
@@ -157,7 +162,7 @@ fingerprint_size = 16
 item_ttl = 86400  # seconds, 0 = no expiration
 dedupe_ttl = 604800  # seconds, 0 = no expiration
 max_orphan_retries = 10
-redis_kwargs = {}  # driver-specific options passed to redis client
+# Any extra keys here are forwarded to the redis client (e.g. socket_timeout = 5)
 ```
 
 !!! info "Redis version compatibility"
@@ -168,17 +173,25 @@ redis_kwargs = {}  # driver-specific options passed to redis client
     - **With Redis 6.x**: Basic queue operations work, but TTL features (`item_ttl`, `dedupe_ttl`) will fail with command errors (`HEXPIRE` not available)
 
 ### Spider settings
-| Setting                    | Type       | Default        | Env variable                     | Validation                               |
-|----------------------------|------------|----------------|----------------------------------|------------------------------------------|
-| `CONCURRENCY`              | `int`      | `10`           | `QCRAWL_CONCURRENCY`             | must be 1-10000                          |
-| `CONCURRENCY_PER_DOMAIN`   | `int`      | `2`            | `QCRAWL_CONCURRENCY_PER_DOMAIN`  | must be >= 1, cannot exceed CONCURRENCY  |
-| `DELAY_PER_DOMAIN`         | `float`    | `0.25`         | `QCRAWL_DELAY_PER_DOMAIN`        | must be >= 0                             |
-| `MAX_DEPTH`                | `int`      | `0`            | `QCRAWL_MAX_DEPTH`               |                                          |
-| `TIMEOUT`                  | `float`    | `30.0`         | `QCRAWL_TIMEOUT`                 | must be > 0                              |
-| `MAX_RETRIES`              | `int`      | `3`            | `QCRAWL_MAX_RETRIES`             | must be >= 0                             |
-| `USER_AGENT`               | `str`      | `'qCrawl/1.0'` | `QCRAWL_USER_AGENT`              |                                          |
-| `IGNORE_QUERY_PARAMS`      | `set[str]` | `None`         | `QCRAWL_IGNORE_QUERY_PARAMS`     | mutually exclusive                       |
-| `KEEP_QUERY_PARAMS`        | `set[str]` | `None`         | `QCRAWL_KEEP_QUERY_PARAMS`       | mutually exclusive                       |
+| Setting                    | Type       | Default                 | Env variable                    | Validation                                  |
+|----------------------------|------------|-------------------------|---------------------------------|---------------------------------------------|
+| `CONCURRENCY`              | `int`      | `10`                    | `QCRAWL_CONCURRENCY`            | must be 1-10000                             |
+| `CONCURRENCY_PER_DOMAIN`   | `int`      | `2`                     | `QCRAWL_CONCURRENCY_PER_DOMAIN` | must be >= 1, cannot exceed CONCURRENCY     |
+| `DELAY_PER_DOMAIN`         | `float`    | `0.25`                  | `QCRAWL_DELAY_PER_DOMAIN`       | must be >= 0                                |
+| `MAX_DEPTH`                | `int`      | `0`                     | `QCRAWL_MAX_DEPTH`              |                                             |
+| `TIMEOUT`                  | `float`    | `30.0`                  | `QCRAWL_TIMEOUT`                | must be > 0                                 |
+| `MAX_RETRIES`              | `int`      | `3`                     | `QCRAWL_MAX_RETRIES`            | must be >= 0                                |
+| `RETRY_ENABLED`            | `bool`     | `True`                  | `QCRAWL_RETRY_ENABLED`          |                                             |
+| `RETRY_HTTP_CODES`         | `list[int]`| `[429,500,502,503,504]` | `QCRAWL_RETRY_HTTP_CODES`       |                                             |
+| `RETRY_PRIORITY_ADJUST`    | `int`      | `-1`                    | `QCRAWL_RETRY_PRIORITY_ADJUST`  |                                             |
+| `RETRY_BACKOFF_BASE`       | `float`    | `1.0`                   | `QCRAWL_RETRY_BACKOFF_BASE`     |                                             |
+| `RETRY_BACKOFF_MAX`        | `float`    | `60.0`                  | `QCRAWL_RETRY_BACKOFF_MAX`      |                                             |
+| `RETRY_BACKOFF_JITTER`     | `float`    | `0.3`                   | `QCRAWL_RETRY_BACKOFF_JITTER`   |                                             |
+| `USER_AGENT`               | `str`      | `'qCrawl/1.0'`          | `QCRAWL_USER_AGENT`             |                                             |
+| `RANDOMIZE_DELAY`          | `bool`     | `False`                 | `QCRAWL_RANDOMIZE_DELAY`        |                                             |
+| `COOKIES_ENABLED`          | `bool`     | `True`                  | `QCRAWL_COOKIES_ENABLED`        |                                             |
+| `IGNORE_QUERY_PARAMS`      | `set[str]` | `None`                  | `QCRAWL_IGNORE_QUERY_PARAMS`    | mutually exclusive with KEEP_QUERY_PARAMS   |
+| `KEEP_QUERY_PARAMS`        | `set[str]` | `None`                  | `QCRAWL_KEEP_QUERY_PARAMS`      | mutually exclusive with IGNORE_QUERY_PARAMS |
 
 
 ### Logging settings

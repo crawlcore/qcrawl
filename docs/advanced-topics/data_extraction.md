@@ -219,11 +219,7 @@ async def start_requests(self):
     yield Request(
         url="https://api.example.com/graphql",
         method="POST",
-        body={
-            "query": query,
-            "variables": {"page": 1}
-        },
-        headers={"Content-Type": "application/json"}
+        json={"query": query, "variables": {"page": 1}},
     )
 
 async def parse(self, response):
@@ -254,7 +250,7 @@ class SitemapSpider(Spider):
 
     async def parse(self, response):
         # Parse sitemap XML
-        root = ET.fromstring(response.text)
+        root = ET.fromstring(response.text())
         namespace = {"ns": "http://www.sitemaps.org/schemas/sitemap/0.9"}
 
         # Extract URLs
@@ -273,7 +269,7 @@ class SitemapSpider(Spider):
 ### Extract sitemap metadata
 ```python
 async def parse(self, response):
-    root = ET.fromstring(response.text)
+    root = ET.fromstring(response.text())
     namespace = {"ns": "http://www.sitemaps.org/schemas/sitemap/0.9"}
 
     for url_elem in root.findall(".//ns:url", namespace):

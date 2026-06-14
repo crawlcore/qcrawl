@@ -17,29 +17,31 @@ Signals provide an event-driven extension mechanism for monitoring and extending
 | `spider_opened` | Spider starts crawling        | `async def handler(sender, spider, **kwargs)`         |
 | `spider_closed` | Spider finishes crawling      | `async def handler(sender, spider, reason, **kwargs)` |
 | `spider_idle`   | Scheduler has no pending URLs | `async def handler(sender, spider, **kwargs)`         |
-| `spider_error`  | Uncaught error in spider      | `async def handler(sender, spider, error, **kwargs)`  |
+| `spider_error`  | Uncaught error in spider      | `async def handler(sender, exc, **kwargs)`            |
 
 ### Request/Response lifecycle
-| Signal                       | Emitted when                     | Handler signature                                                 |
-|------------------------------|----------------------------------|-------------------------------------------------------------------|
-| `request_scheduled`          | Request added to scheduler       | `async def handler(sender, request, spider, **kwargs)`            |
-| `request_dropped`            | Request filtered/dropped         | `async def handler(sender, request, spider, **kwargs)`            |
-| `request_reached_downloader` | Request sent to downloader       | `async def handler(sender, request, spider, **kwargs)`            |
-| `request_failed`             | Download failed                  | `async def handler(sender, request, error, spider, **kwargs)`     |
-| `response_received`          | Response successfully downloaded | `async def handler(sender, response, request, spider, **kwargs)`  |
+| Signal                       | Emitted when                     | Handler signature                                           |
+|------------------------------|----------------------------------|-------------------------------------------------------------|
+| `request_scheduled`          | Request added to scheduler       | `async def handler(sender, request, **kwargs)`              |
+| `request_dropped`            | Request filtered/dropped         | `async def handler(sender, request, exception, **kwargs)`   |
+| `request_reached_downloader` | Request sent to downloader       | `async def handler(sender, request, **kwargs)`              |
+| `request_failed`             | Download failed                  | `async def handler(sender, request, error, **kwargs)`       |
+| `response_received`          | Response successfully downloaded | `async def handler(sender, response, request, **kwargs)`    |
 
 ### Item lifecycle
-| Signal         | Emitted when              | Handler signature                                             |
-|----------------|---------------------------|---------------------------------------------------------------|
-| `item_scraped` | Item yielded from spider  | `async def handler(sender, item, response, spider, **kwargs)` |
-| `item_dropped` | Item filtered by pipeline | `async def handler(sender, item, spider, **kwargs)`           |
-| `item_error`   | Item processing failed    | `async def handler(sender, item, error, spider, **kwargs)`    |
+| Signal         | Emitted when                                       | Handler signature                                          |
+|----------------|----------------------------------------------------|------------------------------------------------------------|
+| `item_scraped` | Item that passed the item pipeline (post-pipeline) | `async def handler(sender, item, spider, **kwargs)`        |
+| `item_dropped` | Item filtered by pipeline                          | `async def handler(sender, item, spider, **kwargs)`        |
+| `item_error`   | Item processing failed                             | `async def handler(sender, item, error, spider, **kwargs)` |
 
 ### Tracking signals
-| Signal             | Emitted when          | Handler signature                                                   |
-|--------------------|-----------------------|---------------------------------------------------------------------|
-| `bytes_received`   | Response bytes read   | `async def handler(sender, data_length, request, spider, **kwargs)` |
-| `headers_received` | Response headers read | `async def handler(sender, headers, request, spider, **kwargs)`     |
+| Signal             | Emitted when          | Handler signature                                       |
+|--------------------|-----------------------|---------------------------------------------------------|
+| `bytes_received`   | Response bytes read   | `async def handler(sender, data, request, **kwargs)`    |
+| `headers_received` | Response headers read | `async def handler(sender, headers, request, **kwargs)` |
+
+**`headers_received` timing:** in the HTTP downloader this fires before the body is read, so a handler can act on headers pre-body (e.g. inspect `Content-Length`). In the Camoufox (browser) downloader it fires after the page has loaded, because the browser navigates atomically — the body is already present by the time the headers are available.
 
 
 ## Connecting handlers
@@ -103,8 +105,9 @@ crawler.signals.connect("item_scraped", permanent_handler, weak=False)
 ### Collecting custom metrics
 ```python
 async def track_api_calls(sender, response, request=None, **kwargs):
+    # `response_received` does not pass `spider`; close over `crawler` for stats.
     if "api" in response.url:
-        sender.stats.inc_value("custom/api_calls", count=1)
+        crawler.stats.inc("custom/api_calls")
 
 crawler.signals.connect("response_received", track_api_calls)
 ```
@@ -123,12 +126,13 @@ crawler.signals.connect("request_failed", log_errors)
 
 ### Custom item validation
 ```python
-async def validate_items(sender, item, response, spider=None, **kwargs):
+async def validate_items(sender, item, spider=None, **kwargs):
     data = getattr(item, "data", item)
 
     if not data.get("title"):
-        logger.warning(f"Item missing title from {response.url}")
-        sender.stats.inc_value("custom/validation_warnings", count=1)
+        logger.warning("Item missing title: %r", data)
+        if spider is not None:
+            spider.crawler.stats.inc("custom/validation_warnings")
 
 crawler.signals.connect("item_scraped", validate_items)
 ```
@@ -136,7 +140,7 @@ crawler.signals.connect("item_scraped", validate_items)
 ### Tracking crawl progress
 ```python
 async def track_progress(sender, spider, **kwargs):
-    stats = sender.stats.get_stats()
+    stats = spider.crawler.stats.snapshot()
     scheduled = stats.get("scheduler/request_scheduled_count", 0)
     downloaded = stats.get("downloader/request_downloaded_count", 0)
 
@@ -151,7 +155,7 @@ crawler.signals.connect("spider_idle", track_progress)
 ### Sending notifications
 ```python
 async def send_completion_email(sender, spider, reason, **kwargs):
-    stats = sender.stats.get_stats()
+    stats = spider.crawler.stats.snapshot()
     items = stats.get("pipeline/item_scraped_count", 0)
 
     # Send email notification (pseudo-code)

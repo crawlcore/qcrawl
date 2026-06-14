@@ -251,7 +251,9 @@ await scheduler.join()
 ```
 
 ### Custom queue backend
-Implement the `RequestQueue` protocol:
+Subclass the `RequestQueue` abstract base class and implement its abstract
+methods (`put`, `get`, `size`, `maxsize`, `clear`, `close`); `__aiter__`/
+`__anext__` are provided for you:
 
 ```python
 from qcrawl.core.queue import RequestQueue
@@ -259,24 +261,28 @@ from qcrawl.core.request import Request
 
 class CustomQueue(RequestQueue):
     async def put(self, request: Request, priority: int = 0) -> None:
-        """Add request to queue with priority."""
-        # Your implementation
-        pass
+        """Enqueue a request (lower priority value = dequeued first)."""
+        ...
 
     async def get(self) -> Request:
-        """Get next request (highest priority first)."""
-        # Your implementation
-        pass
+        """Await and return the next request (lowest priority value first)."""
+        ...
 
     async def size(self) -> int:
-        """Return number of queued requests."""
-        # Your implementation
-        pass
+        """Return the number of queued requests."""
+        ...
+
+    def maxsize(self) -> int:
+        """Return the maximum capacity (0 = unlimited)."""
+        ...
+
+    async def clear(self) -> None:
+        """Remove all queued requests."""
+        ...
 
     async def close(self) -> None:
-        """Close queue and cleanup resources."""
-        # Your implementation
-        pass
+        """Close the queue and release resources."""
+        ...
 ```
 
 Register custom queue:

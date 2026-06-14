@@ -1,5 +1,5 @@
 
-The scheduler processes requests based on priority values. Higher priority requests are processed first. By adjusting priorities, you can control whether your crawler explores pages breadth-first (level by level), depth-first (following paths deeply), or with custom focus on specific content.
+The scheduler processes requests based on priority values. Requests with a lower priority value are processed first (priority `0` is the default). By adjusting priorities, you can control whether your crawler explores pages breadth-first (level by level), depth-first (following paths deeply), or with custom focus on specific content.
 
 ## Breadth-first crawl (default)
 
@@ -39,15 +39,17 @@ async def parse(self, response):
     rv = self.response_view(response)
 
     current_depth = response.request.meta.get("depth", 0)
-    next_priority = current_depth  # Higher depth = higher priority
+    next_depth = current_depth + 1
 
     for link in rv.doc.cssselect("a"):
         href = link.get("href")
         if href:
+            # Lower priority value = processed sooner, so each request gets
+            # priority -depth: the deepest queued link is always followed first.
             yield rv.follow(
                 href,
-                priority=next_priority,
-                meta={"depth": current_depth + 1}
+                priority=-next_depth,
+                meta={"depth": next_depth},
             )
 ```
 
@@ -66,15 +68,15 @@ Prioritize specific content types or URL patterns:
 async def parse(self, response):
     rv = self.response_view(response)
 
-    # High priority for target content
+    # High priority for target content (lower value = processed first)
     if "product" in response.url:
         for link in rv.doc.cssselect("a.product"):
-            yield rv.follow(link.get("href"), priority=100)
+            yield rv.follow(link.get("href"), priority=-100)
 
-    # Low priority for other pages
+    # Lower priority for other pages
     else:
         for link in rv.doc.cssselect("a"):
-            yield rv.follow(link.get("href"), priority=1)
+            yield rv.follow(link.get("href"), priority=10)
 ```
 
 **Use cases:**

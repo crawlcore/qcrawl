@@ -72,7 +72,7 @@ async def parse(self, response):
 - `response.url` - Final URL (after redirects)
 - `response.status_code` - HTTP status (200, 404, etc.)
 - `response.headers` - Response headers dict
-- `response.text` - Raw HTML content
+- `response.text()` - Raw HTML content
 - `response.json()` - Parse JSON responses
 
 **ResponseView (rv) provides:**

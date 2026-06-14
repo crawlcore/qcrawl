@@ -19,7 +19,7 @@ No configuration needed - it works out of the box!
 
 ### Configure retry settings
 
-Customize retry behavior in spider settings:
+All retry behaviour is configurable via settings:
 
 ```python
 class MySpider(Spider):
@@ -27,15 +27,12 @@ class MySpider(Spider):
     start_urls = ["https://example.com"]
 
     custom_settings = {
-        "RETRY_ENABLED": True,  # Default: True
-        "RETRY_TIMES": 5,  # Max retries (default: 3)
-        "RETRY_HTTP_CODES": [429, 500, 502, 503, 504, 408],  # Status codes to retry
-        "RETRY_PRIORITY_ADJUST": -1,  # Lower priority for retries (default: -1)
-
-        # Exponential backoff parameters
-        "RETRY_BACKOFF_BASE": 2.0,  # Base delay in seconds (default: 1.0)
-        "RETRY_BACKOFF_MAX": 120.0,  # Max delay in seconds (default: 60.0)
-        "RETRY_BACKOFF_JITTER": 0.3,  # Jitter fraction (default: 0.3)
+        "MAX_RETRIES": 5,                                    # default: 3
+        "RETRY_HTTP_CODES": [429, 500, 502, 503, 504, 408],  # default: [429, 500, 502, 503, 504]
+        "RETRY_PRIORITY_ADJUST": -1,                         # default: -1 (lower priority for retries)
+        "RETRY_BACKOFF_BASE": 2.0,                           # default: 1.0
+        "RETRY_BACKOFF_MAX": 120.0,                          # default: 60.0
+        "RETRY_BACKOFF_JITTER": 0.3,                         # default: 0.3
     }
 ```
 
@@ -61,7 +58,7 @@ With jitter applied: `delay ± (delay * jitter)`
 Check retry statistics:
 
 ```python
-stats = crawler.stats.get_stats()
+stats = crawler.stats.snapshot()
 
 print(f"Total retries: {stats.get('downloader/retry/total', 0)}")
 print(f"Network errors: {stats.get('downloader/retry/network_error', 0)}")
@@ -69,14 +66,20 @@ print(f"HTTP errors: {stats.get('downloader/retry/http_error', 0)}")
 print(f"Max retries reached: {stats.get('downloader/retry/max_reached', 0)}")
 ```
 
-### Disable retry for specific requests
+### Skip retries for specific requests
+
+Control retries per request through `meta`: `dont_retry` skips retrying a
+request entirely, and `max_retry_times` caps its retries independently of the
+`MAX_RETRIES` setting.
 
 ```python
-# Disable retry for a specific request
-yield Request(
-    url="https://example.com/optional",
-    meta={"dont_retry": True}
-)
+from qcrawl.core.request import Request
+
+# Never retry this request
+yield Request(url="https://example.com/optional", meta={"dont_retry": True})
+
+# Allow at most one retry for this request
+yield Request(url="https://example.com/flaky", meta={"max_retry_times": 1})
 ```
 
 
@@ -232,7 +235,7 @@ async def parse(self, response):
         self.logger.warning(
             f"No items found on {response.url} "
             f"(status: {response.status_code}, "
-            f"content-length: {len(response.text)})"
+            f"content-length: {len(response.text())})"
         )
 
         # Log page structure for debugging
@@ -252,7 +255,7 @@ async def parse(self, response):
 ## Best practices
 
 - **Use built-in RetryMiddleware**: It's enabled by default and handles network errors and HTTP errors automatically
-- **Configure retry settings**: Adjust `RETRY_TIMES`, `RETRY_HTTP_CODES`, and backoff parameters as needed
+- **Configure retry settings**: Adjust `MAX_RETRIES`, `RETRY_HTTP_CODES`, `RETRY_PRIORITY_ADJUST`, and `RETRY_BACKOFF_*` as needed
 - **Monitor retry stats**: Track retry metrics to detect problematic sources
 - **Handle missing data gracefully**: Use default values and defensive checks for optional fields
 - **Log errors appropriately**: Use different log levels (warning, error, debug)

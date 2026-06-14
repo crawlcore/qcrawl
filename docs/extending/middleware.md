@@ -38,11 +38,11 @@ Called **before** the request is sent to the downloader.
 - Modify request parameters
 - Log outgoing requests
 
-**Returns**: `MiddlewareResult` enum
+**Returns**: a `MiddlewareResult` from one of its factory methods
 
-- `CONTINUE` - Pass request to next middleware
-- `KEEP` - Stop chain, send this request to downloader
-- `DROP` - Drop request entirely (don't download)
+- `MiddlewareResult.continue_()` - Pass request to next middleware / proceed to download
+- `MiddlewareResult.keep(page)` - Short-circuit: use this `Page` instead of downloading
+- `MiddlewareResult.drop()` - Drop request entirely (don't download)
 
 **Example**:
 ```python
@@ -52,7 +52,7 @@ class AuthMiddleware(DownloaderMiddleware):
     async def process_request(self, request, spider):
         # Add authentication token
         request.headers["Authorization"] = f"Bearer {spider.api_token}"
-        return MiddlewareResult.CONTINUE
+        return MiddlewareResult.continue_()
 ```
 
 #### process_response(request, response, spider)
@@ -66,12 +66,12 @@ Called **after** the downloader returns a response.
 - Log responses
 - Trigger retries
 
-**Returns**: `MiddlewareResult` enum
+**Returns**: a `MiddlewareResult` from one of its factory methods
 
-- `CONTINUE` - Pass response to next middleware
-- `KEEP` - Stop chain, send this response to spider
-- `RETRY` - Retry the request
-- `DROP` - Drop response (don't send to spider)
+- `MiddlewareResult.continue_()` - Pass response to next middleware
+- `MiddlewareResult.keep(page)` - Stop chain, send this `Page` to the spider
+- `MiddlewareResult.retry(request)` - Retry the request
+- `MiddlewareResult.drop()` - Drop response (don't send to spider)
 
 **Example**:
 ```python
@@ -80,9 +80,9 @@ class StatusCodeMiddleware(DownloaderMiddleware):
         # Drop 404 responses
         if response.status_code == 404:
             spider.logger.warning(f"Page not found: {response.url}")
-            return MiddlewareResult.DROP
+            return MiddlewareResult.drop()
 
-        return MiddlewareResult.CONTINUE
+        return MiddlewareResult.continue_()
 ```
 
 #### process_exception(request, exception, spider)
@@ -95,11 +95,11 @@ Called when an exception occurs during download.
 - Retry failed requests
 - Return fallback responses
 
-**Returns**: `MiddlewareResult` enum
+**Returns**: a `MiddlewareResult` from one of its factory methods
 
-- `CONTINUE` - Pass to next middleware
-- `RETRY` - Retry the request
-- `DROP` - Drop request
+- `MiddlewareResult.continue_()` - Pass to next middleware
+- `MiddlewareResult.retry(request)` - Retry the request
+- `MiddlewareResult.drop()` - Drop request
 
 **Example**:
 ```python
@@ -110,9 +110,9 @@ class NetworkErrorMiddleware(DownloaderMiddleware):
     async def process_exception(self, request, exception, spider):
         if isinstance(exception, aiohttp.ClientError):
             spider.logger.error(f"Network error for {request.url}: {exception}")
-            return MiddlewareResult.RETRY
+            return MiddlewareResult.retry(request)
 
-        return MiddlewareResult.CONTINUE
+        return MiddlewareResult.continue_()
 ```
 
 ### Execution order
@@ -176,21 +176,21 @@ Called **before** `spider.parse()` receives the response.
 - Filter responses
 - Log incoming responses
 
-**Returns**: `MiddlewareResult` enum
+**Returns**: `Exception | None`
 
-- `CONTINUE` - Pass response to next middleware
-- `DROP` - Drop response (don't parse)
+- Return `None` to continue to `spider.parse()`
+- Return an `Exception` instance to abort parsing this response (it is routed to `process_spider_exception`)
 
 **Example**:
 ```python
 class ResponseValidationMiddleware(SpiderMiddleware):
     async def process_spider_input(self, response, spider):
-        # Drop empty responses
-        if not response.text:
+        # Abort parsing of empty responses (note: response.text is a method)
+        if not response.text():
             spider.logger.warning(f"Empty response from {response.url}")
-            return MiddlewareResult.DROP
+            return ValueError("empty response")
 
-        return MiddlewareResult.CONTINUE
+        return None
 ```
 
 #### process_spider_output(response, result, spider)
@@ -207,12 +207,9 @@ Called with each Item or Request yielded by `spider.parse()`.
 **Parameters**:
 
 - `response` - The response being parsed
-- `result` - Individual Item or Request yielded by spider
+- `result` - Async generator of the Items/Requests/`str` yielded by the spider
 
-**Returns**: `Item | Request | None`
-
-- Return the result to pass it along
-- Return `None` to drop it
+**Returns**: an async generator — iterate `result` and `yield` what should pass along (skip an item by not yielding it)
 
 **Example**:
 ```python
@@ -220,13 +217,12 @@ class ItemFilterMiddleware(SpiderMiddleware):
     async def process_spider_output(self, response, result, spider):
         from qcrawl.core.item import Item
 
-        # Filter out items without title
-        if isinstance(result, Item):
-            if not result.data.get("title"):
+        async for obj in result:
+            # Filter out items without a title; pass everything else through
+            if isinstance(obj, Item) and not obj.data.get("title"):
                 spider.logger.debug("Dropping item without title")
-                return None
-
-        return result
+                continue
+            yield obj
 ```
 
 #### process_spider_exception(response, exception, spider)
@@ -239,7 +235,7 @@ Called when spider.parse() raises an exception.
 - Return fallback Items/Requests
 - Skip problematic pages
 
-**Returns**: List of Items/Requests or empty list
+**Returns**: an async generator of recovery Items/Requests, or `None` to re-raise
 
 **Example**:
 ```python
@@ -247,10 +243,12 @@ class ParsingErrorMiddleware(SpiderMiddleware):
     async def process_spider_exception(self, response, exception, spider):
         spider.logger.error(
             f"Error parsing {response.url}: {exception}",
-            exc_info=True
+            exc_info=True,
         )
-        # Return empty list to skip this page
-        return []
+        # Return None to skip this page (the exception is re-raised/logged).
+        # To recover instead, make this an async generator that `yield`s
+        # Items/Requests.
+        return None
 ```
 
 ### Execution order
@@ -270,32 +268,34 @@ MW3.process_spider_output ← MW2.process_spider_output ← MW1.process_spider_o
 
 ## Middleware Results
 
-Middlewares return `MiddlewareResult` enum to control execution flow:
+Downloader middlewares return a `MiddlewareResult`, built via its factory methods, to control execution flow:
 
 ```python
 from qcrawl.middleware.base import MiddlewareResult
 
 class MyMiddleware(DownloaderMiddleware):
-    async def process_request(self, request, spider):
+    async def process_response(self, request, response, spider):
         # Continue to next middleware
-        return MiddlewareResult.CONTINUE
+        return MiddlewareResult.continue_()
 
-        # Stop chain, use current value
-        return MiddlewareResult.KEEP
+        # Stop chain, use this Page as the response
+        return MiddlewareResult.keep(response)
 
-        # Retry the request
-        return MiddlewareResult.RETRY
+        # Retry the given request
+        return MiddlewareResult.retry(request)
 
-        # Drop request/response
-        return MiddlewareResult.DROP
+        # Drop the request/response
+        return MiddlewareResult.drop()
 ```
 
 **When to use each**:
 
-- `CONTINUE` - Default, pass to next middleware
-- `KEEP` - Stop chain early (optimization)
-- `RETRY` - Request failed, retry with backoff
-- `DROP` - Filter out unwanted requests/responses
+- `continue_()` - Default, pass to next middleware
+- `keep(page)` - Stop chain early with a specific `Page` (optimization / short-circuit)
+- `retry(request)` - Request failed, retry with backoff
+- `drop()` - Filter out unwanted requests/responses
+
+(Spider middlewares do not use `MiddlewareResult`: `process_spider_input` returns `Exception | None`, while `process_spider_output`/`process_spider_exception` are async generators.)
 
 
 ## Registering Middlewares
@@ -372,8 +372,8 @@ class StatefulMiddleware(DownloaderMiddleware):
         )
 
     async def process_request(self, request, spider):
-        self.stats.inc_value("custom/requests")
-        return MiddlewareResult.CONTINUE
+        self.stats.inc("custom/requests")
+        return MiddlewareResult.continue_()
 ```
 
 ### Spider-specific state
@@ -399,7 +399,7 @@ class RateLimitMiddleware(DownloaderMiddleware):
             await asyncio.sleep(delay - (current_time - last_time))
 
         self.request_times[domain] = time.time()
-        return MiddlewareResult.CONTINUE
+        return MiddlewareResult.continue_()
 ```
 
 ## Best Practices

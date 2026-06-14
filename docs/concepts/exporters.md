@@ -83,13 +83,14 @@ qcrawl quotes_css_spider:Quotes --export output.xml --export-format xml
     <url>https://quotes.toscrape.com/</url>
     <text>The world as we...</text>
     <author>Albert Einstein</author>
-    <tags>
-      <value>change</value>
-      <value>world</value>
-    </tags>
+    <tags>['change', 'world']</tags>
   </item>
 </items>
 ```
+
+The XML exporter writes each field value via `str(value)`, so non-scalar
+values (lists, dicts) are stringified rather than expanded into child elements.
+Flatten or pre-format such fields in a pipeline if you need structured XML.
 
 ### Streaming vs Buffered Mode
 

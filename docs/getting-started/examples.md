@@ -230,8 +230,8 @@ async def main():
         }
     )
 
-    # Run any spider (e.g., QuotesSpider from examples above)
-    await runner.crawl(QuotesSpider)
+    # Run any spider defined above (e.g. Quotes)
+    await runner.crawl(Quotes)
 
 if __name__ == "__main__":
     asyncio.run(main())

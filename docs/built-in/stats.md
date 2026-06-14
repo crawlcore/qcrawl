@@ -24,7 +24,9 @@ It allows monitoring and recording various metrics during crawling sessions.
 | `downloader/response_status_count`    | Total responses received                                                 |
 | `downloader/response_status_{CODE}`   | Responses grouped by HTTP status (e.g. `downloader/response_status_200`) |
 | `downloader/bytes_downloaded`         | Total bytes received                                                     |
-| `pipeline/item_scraped_count`         | Total items yielded to pipelines                                         |
+| `pipeline/item_scraped_count`         | Items that passed the item pipeline (emitted post-pipeline)              |
+| `pipeline/item_dropped_count`         | Items dropped by a pipeline (via `DropItem`)                             |
+| `pipeline/item_error_count`           | Items whose pipeline processing raised an unexpected error               |
 | `engine/error_count`                  | Total exceptions/errors signalled as engine errors                       |
 
 
@@ -36,10 +38,10 @@ async with Crawler(spider, settings) as crawler:
     await crawler.crawl()
 
     # Get single value (inside context manager)
-    downloaded = crawler.stats.get_value("downloader/request_downloaded_count", 0)
+    downloaded = crawler.stats.get("downloader/request_downloaded_count", 0)
 
     # Get all stats snapshot
-    all_stats = crawler.stats.get_stats()
+    all_stats = crawler.stats.snapshot()
     print(f"Downloaded {downloaded} pages")
 ```
 
@@ -48,7 +50,7 @@ async with Crawler(spider, settings) as crawler:
 # Store stats before crawler closes
 async with Crawler(spider, settings) as crawler:
     await crawler.crawl()
-    stats = crawler.stats.get_stats()  # Get stats before exiting
+    stats = crawler.stats.snapshot()  # Get stats before exiting
 
 # Use stats after crawler is closed
 downloaded_count = stats.get('downloader/request_downloaded_count', 0)
@@ -57,25 +59,27 @@ print(f"Downloaded {downloaded_count} pages")
 
 ## Adding Custom Metrics
 
-Increment Counter
+`StatsCollector` exposes intent-revealing operations over a single flat,
+slash-namespaced key store — the verb says what kind of metric it is:
 
 ```python
-crawler.stats.inc_value("custom/my_metric", count=1)
+crawler.stats.inc("custom/my_metric")                 # counter: increment by 1 (or count=N)
+crawler.stats.set("custom/queue_depth", 42)            # gauge: set a number
+crawler.stats.max("custom/peak_depth", 128)            # gauge: keep the high-water mark
+crawler.stats.min("custom/min_latency", 0.12)          # gauge: keep the low-water mark
+crawler.stats.label("custom/last_run", "2025-04-05")   # string metadata
 ```
 
-Set Value
+Read them back with `get(key, default)` for one value or `snapshot()` for a copy
+of everything.
 
-```python
-crawler.stats.set_counter("custom/processed_items", 42)
-crawler.stats.set_meta("custom/last_run", "2025-04-05")
-```
-
-Preferred way to add custom metrics (using Signals):
+The preferred way to record custom metrics is from a signal handler:
 
 ```python
 async def on_response(sender, response, request=None, **kwargs):
+    # `response_received` does not pass `spider`; close over `crawler` for stats.
     if "api" in getattr(response, "url", ""):
-        sender.stats.inc_value("api_calls", count=1)
+        crawler.stats.inc("custom/api_calls")
 
 # Connect the handler to the crawler-bound dispatcher
 crawler.signals.connect("response_received", on_response)

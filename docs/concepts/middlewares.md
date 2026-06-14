@@ -103,8 +103,8 @@ class MySpider(Spider):
 
 ## Available spider middlewares
 
-| Name                  | Purpose                                                                                   | Configuration parameters                                                                                        |
-|-----------------------|-------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------|
-| `DepthMiddleware`     | Limit crawl depth, track depth distribution, and adjust request priority.                 | `default_max_depth: int` (default `0`)<br>`default_priority: int` (default `1`)                                 |
-| `HttpErrorMiddleware` | Filter responses with disallowed HTTP status codes and emit stats for filtered responses. | `allowed_codes: list[int]` (default `200-399`)<br>Per-spider: `HTTPERROR_ALLOW_ALL`, `HTTPERROR_ALLOWED_CODES`  |
-| `OffsiteMiddleware`   | Filter requests to URLs outside configured allowed domains.                               | `enabled: bool` — default `True`<br>Per-spider: `ALLOWED_DOMAINS` (str/list/tuple/set)                          |
+| Name                  | Purpose                                                                                   | Configuration parameters                                                                                             |
+|-----------------------|-------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------|
+| `DepthMiddleware`     | Limit crawl depth, track depth distribution, and adjust request priority.                 | `MAX_DEPTH` setting (default `0` = unlimited; or per-spider `max_depth` attr), `default_priority: int` (default `1`) |
+| `HttpErrorMiddleware` | Filter responses with disallowed HTTP status codes and emit stats for filtered responses. | `allowed_codes: list[int]` (default `200-399`)<br>Per-spider: `HTTPERROR_ALLOW_ALL`, `HTTPERROR_ALLOWED_CODES`       |
+| `OffsiteMiddleware`   | Filter requests to URLs outside configured allowed domains.                               | Per-spider: `allowed_domains` (str/list/tuple/set); falls back to domains from `start_urls`                          |

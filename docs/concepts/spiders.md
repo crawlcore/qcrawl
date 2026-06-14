@@ -87,3 +87,28 @@ The simplified scraping cycle works as follows:
 3. The engine calls your spider's `parse(response)` method with the downloaded response. Inside this method, you parse the page content (using CSS selectors, XPath) and yield either `Item` objects containing extracted data or new `Request` objects for additional URLs to crawl.
 4. Any yielded `Request` / `URL` / `Item` object are returned to the scheduler, enqueued, and processed in the same way — forming a continuous loop until no more requests remain.
 5. Any yielded `Item` objects are sent to the export process: [item pipelines](item_pipeline.md) (drop, transform), [exporters](exporters.md) (data formating), and storage backends (save data).
+
+
+## Per-request callbacks
+
+By default every response is handled by `parse()`. To route a specific request's
+response to a different spider method, pass `callback` (a method or its name) and
+optional `cb_kwargs` when creating the request:
+
+```python
+class MySpider(Spider):
+    name = "my_spider"
+    start_urls = ["https://example.com"]
+
+    async def parse(self, response):
+        rv = self.response_view(response)
+        for link in rv.doc.cssselect("a.detail"):
+            yield rv.follow(link.get("href"), callback=self.parse_detail, cb_kwargs={"source": "list"})
+
+    async def parse_detail(self, response, source):
+        yield {"url": response.url, "source": source}
+```
+
+The callback is stored by name so requests stay serializable across the
+disk/Redis queues; the engine resolves it on the spider at dispatch (defaulting
+to `parse`). A lambda or other unnamed callable is rejected.

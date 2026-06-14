@@ -50,7 +50,9 @@ class ConcurrencyLimitedSpider(Spider):
 
 ## Per-request delay with meta
 
-Control delay for individual requests:
+Control delay for individual requests. `DownloadDelayMiddleware` reads the
+per-request delay from `meta["retry_delay"]` (the same key the retry middleware
+uses for backoff); the effective wait is `max(DELAY_PER_DOMAIN, retry_delay)`:
 
 ```python
 async def parse(self, response):
@@ -61,13 +63,13 @@ async def parse(self, response):
         if "important" in link.get("class", ""):
             yield rv.follow(
                 link.get("href"),
-                meta={"download_delay": 0.5}
+                meta={"retry_delay": 0.5}
             )
         # Regular requests: slower
         else:
             yield rv.follow(
                 link.get("href"),
-                meta={"download_delay": 3.0}
+                meta={"retry_delay": 3.0}
             )
 ```
 
@@ -96,7 +98,7 @@ async def parse(self, response):
             yield rv.follow(
                 link.get("href"),
                 meta={
-                    "download_delay": delay,
+                    "retry_delay": delay,
                     "last_request_time": current_time
                 }
             )
@@ -142,7 +144,7 @@ class AdaptiveSpider(Spider):
         for link in rv.doc.cssselect("a"):
             yield rv.follow(
                 link.get("href"),
-                meta={"download_delay": delay}
+                meta={"retry_delay": delay}
             )
 ```
 
@@ -183,7 +185,7 @@ class ApiSpider(Spider):
                     delay = 60 - elapsed
                     yield Request(
                         url=f"https://api.example.com/data?page={page}",
-                        meta={"download_delay": delay}
+                        meta={"retry_delay": delay}
                     )
                     # Reset counter
                     self.requests_this_minute = 0
@@ -225,7 +227,7 @@ class MultiDomainSpider(Spider):
 
                 yield rv.follow(
                     href,
-                    meta={"download_delay": delay}
+                    meta={"retry_delay": delay}
                 )
 ```
 
@@ -260,7 +262,7 @@ class TimeAwareSpider(Spider):
         for link in rv.doc.cssselect("a"):
             yield rv.follow(
                 link.get("href"),
-                meta={"download_delay": delay}
+                meta={"retry_delay": delay}
             )
 ```
 
